@@ -99,7 +99,8 @@ bool IsRelationalOp(std::string_view op) {
 
 class SemanticAnalyzer {
  public:
-  explicit SemanticAnalyzer(std::string_view filename) : filename_(filename) {}
+  explicit SemanticAnalyzer(std::string_view filename, bool strict_mode)
+      : filename_(filename), strict_mode_(strict_mode) {}
 
   void Analyze(Node* program) {
     if (program->kind != "Program") {
@@ -701,6 +702,36 @@ class SemanticAnalyzer {
     return out.str();
   }
 
+  static bool IsPermissiveOnlyModifier(std::string_view token) {
+    static const std::unordered_set<std::string> kPermissiveOnlyModifiers = {
+        "public", "interrupt", "noreg", "reg", "no_warn", "_extern", "_import", "_export"};
+    return kPermissiveOnlyModifiers.find(std::string(token)) != kPermissiveOnlyModifiers.end();
+  }
+
+  void ValidateDeclModifiers(std::string_view decl_text, std::string_view context) const {
+    if (!strict_mode_) {
+      return;
+    }
+    std::istringstream stream(TrimCopy(std::string(decl_text)));
+    std::string token;
+    while (stream >> token) {
+      if (IsPermissiveOnlyModifier(token)) {
+        Error("strict mode rejects compatibility modifier '" + token + "' in " +
+              std::string(context) + "; pass --permissive to enable it");
+      }
+    }
+  }
+
+  void ValidateLinkageKind(std::string_view linkage_kind, std::string_view context) const {
+    if (!strict_mode_) {
+      return;
+    }
+    if (linkage_kind == "_extern" || linkage_kind == "_import" || linkage_kind == "_export") {
+      Error("strict mode rejects compatibility linkage '" + std::string(linkage_kind) + "' in " +
+            std::string(context) + "; pass --permissive to enable it");
+    }
+  }
+
   static bool IsStatementNodeKind(std::string_view kind) {
     if (kind == "VarDecl" || kind == "VarDeclList" || kind == "Block" || kind == "CaseClause" ||
         kind == "DefaultClause" || kind == "LabelStmt" || kind == "TypeAliasDecl" ||
@@ -806,6 +837,7 @@ class SemanticAnalyzer {
       if (fn_name.empty()) {
         Error("invalid function declaration: " + child.text);
       }
+      ValidateDeclModifiers(ret_ty, "function declaration");
 
       FunctionSig sig;
       const std::string normalized_ret_ty = StripDeclModifiers(ret_ty);
@@ -820,6 +852,7 @@ class SemanticAnalyzer {
           if (param_name.empty()) {
             Error("invalid parameter declaration: " + p.text);
           }
+          ValidateDeclModifiers(param_ty, "parameter declaration");
           const std::string normalized_param_ty = StripDeclModifiers(param_ty);
           const Node* default_expr = FindChildByKind(p, "Default");
           sig.params.push_back(ParamSig{normalized_param_ty.empty() ? "I64" : normalized_param_ty,
@@ -864,6 +897,7 @@ class SemanticAnalyzer {
         if (name.empty()) {
           Error("invalid global variable declaration: " + child.text);
         }
+        ValidateDeclModifiers(decl_ty, "global variable declaration");
         const std::string normalized_decl_ty = StripDeclModifiers(decl_ty);
         DeclareGlobal(name, normalized_decl_ty.empty() ? "I64" : normalized_decl_ty);
         continue;
@@ -878,6 +912,7 @@ class SemanticAnalyzer {
           if (name.empty()) {
             Error("invalid global variable declaration: " + item.text);
           }
+          ValidateDeclModifiers(decl_ty, "global variable declaration");
           const std::string normalized_decl_ty = StripDeclModifiers(decl_ty);
           DeclareGlobal(name, normalized_decl_ty.empty() ? "I64" : normalized_decl_ty);
         }
@@ -888,11 +923,13 @@ class SemanticAnalyzer {
         if (child.children.empty()) {
           continue;
         }
+        ValidateLinkageKind(child.text, "linkage declaration");
         const std::string& decl_spec = child.children[0].text;
         const auto [decl_ty, name] = ParseTypedName(decl_spec);
         if (name.empty()) {
           continue;
         }
+        ValidateDeclModifiers(decl_ty, "linkage declaration");
         const std::string normalized_decl_ty = StripDeclModifiers(decl_ty);
         DeclareImported(name, normalized_decl_ty.empty() ? "I64" : normalized_decl_ty,
                         child.text);
@@ -920,6 +957,7 @@ class SemanticAnalyzer {
           if (field_name.empty()) {
             continue;
           }
+          ValidateDeclModifiers(field_ty, "field declaration");
           if (members.find(field_name) != members.end()) {
             Error("duplicate field in " + class_name + ": " + field_name);
           }
@@ -991,6 +1029,7 @@ class SemanticAnalyzer {
     if (fn_name.empty()) {
       Error("invalid function name");
     }
+    ValidateDeclModifiers(ret_ty, "function declaration");
 
     labels_.clear();
     goto_targets_.clear();
@@ -1010,7 +1049,8 @@ class SemanticAnalyzer {
       CollectGotoLegalityInfo(*body, 0, &next_index);
     }
 
-    current_return_type_ = ret_ty.empty() ? "I64" : ret_ty;
+    const std::string normalized_ret_ty = StripDeclModifiers(ret_ty);
+    current_return_type_ = normalized_ret_ty.empty() ? "I64" : normalized_ret_ty;
     if (fn_node.line < 0) {
       fn_node.line = 0;
     }
@@ -1464,6 +1504,7 @@ class SemanticAnalyzer {
     if (name.empty()) {
       Error("invalid variable declaration: " + node.text);
     }
+    ValidateDeclModifiers(decl_ty, "variable declaration");
     const std::string normalized_decl_ty = StripDeclModifiers(decl_ty);
     const std::string resolved_type = normalized_decl_ty.empty() ? "I64" : normalized_decl_ty;
     if (in_function_) {
@@ -1935,6 +1976,7 @@ class SemanticAnalyzer {
   }
 
   std::string filename_;
+  bool strict_mode_ = true;
   std::string current_return_type_;
   bool in_function_ = false;
   std::unordered_map<std::string, FunctionSig> functions_;
@@ -1956,9 +1998,10 @@ class SemanticAnalyzer {
 
 }  // namespace
 
-TypedNode AnalyzeSemantics(const ParsedNode& program, std::string_view filename) {
+TypedNode AnalyzeSemantics(const ParsedNode& program, std::string_view filename,
+                           bool strict_mode) {
   Node typed = ConvertToTyped(program);
-  SemanticAnalyzer analyzer(filename);
+  SemanticAnalyzer analyzer(filename, strict_mode);
   analyzer.Analyze(&typed);
   return typed;
 }

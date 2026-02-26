@@ -354,6 +354,12 @@ class IrBuilderEmitter {
     bool is_signed = false;
   };
 
+  struct PrintFormatSpec {
+    char conv = '\0';
+    bool width_from_arg = false;
+    bool precision_from_arg = false;
+  };
+
   static constexpr std::size_t kTryFrameStorageSize = sizeof(hc_try_frame);
   static constexpr unsigned kTryFrameStorageAlignment =
       static_cast<unsigned>(alignof(hc_try_frame));
@@ -2179,6 +2185,130 @@ class IrBuilderEmitter {
     return {true, ""};
   }
 
+  static bool IsFloatPrintConversion(char conv) {
+    return conv == 'f' || conv == 'F' || conv == 'e' || conv == 'E' || conv == 'g' ||
+           conv == 'G';
+  }
+
+  static std::vector<PrintFormatSpec> ParsePrintFormatSpecifiers(std::string_view format,
+                                                                  std::string* error) {
+    std::vector<PrintFormatSpec> specs;
+    std::size_t i = 0;
+    while (i < format.size()) {
+      if (format[i] != '%') {
+        ++i;
+        continue;
+      }
+      if (i + 1 >= format.size()) {
+        if (error != nullptr) {
+          *error = "dangling '%' in print format string";
+        }
+        return {};
+      }
+
+      ++i;
+      if (format[i] == '%') {
+        ++i;
+        continue;
+      }
+
+      while (i < format.size() &&
+             (format[i] == '-' || format[i] == '+' || format[i] == ' ' || format[i] == '#' ||
+              format[i] == '0' || format[i] == '\'')) {
+        ++i;
+      }
+
+      PrintFormatSpec spec;
+      if (i < format.size() && format[i] == '*') {
+        spec.width_from_arg = true;
+        ++i;
+      }
+      while (i < format.size() && std::isdigit(static_cast<unsigned char>(format[i])) != 0) {
+        ++i;
+      }
+
+      if (i < format.size() && format[i] == '.') {
+        ++i;
+        if (i < format.size() && format[i] == '*') {
+          spec.precision_from_arg = true;
+          ++i;
+        }
+        while (i < format.size() && std::isdigit(static_cast<unsigned char>(format[i])) != 0) {
+          ++i;
+        }
+      }
+
+      while (i < format.size()) {
+        const char lm = format[i];
+        if (lm == 'h' || lm == 'l' || lm == 'j' || lm == 't' || lm == 'L' || lm == 'q') {
+          ++i;
+          if ((lm == 'h' || lm == 'l') && i < format.size() && format[i] == lm) {
+            ++i;
+          }
+          continue;
+        }
+        break;
+      }
+
+      if (i >= format.size()) {
+        if (error != nullptr) {
+          *error = "incomplete print format conversion";
+        }
+        return {};
+      }
+
+      const char conv = format[i++];
+      switch (conv) {
+        case 'd':
+        case 'i':
+        case 'u':
+        case 'x':
+        case 'X':
+        case 'o':
+        case 'b':
+        case 'c':
+        case 's':
+        case 'p':
+        case 'P':
+        case 'z':
+        case 'f':
+        case 'F':
+        case 'e':
+        case 'E':
+        case 'g':
+        case 'G':
+          spec.conv = conv;
+          specs.push_back(spec);
+          break;
+        default:
+          if (error != nullptr) {
+            *error = std::string("unsupported print conversion '%") + conv + "'";
+          }
+          return {};
+      }
+    }
+    return specs;
+  }
+
+  static std::vector<bool> BuildPrintArgFloatMask(const std::vector<PrintFormatSpec>& specs) {
+    std::vector<bool> mask;
+    for (const PrintFormatSpec& spec : specs) {
+      if (spec.width_from_arg) {
+        mask.push_back(false);
+      }
+      if (spec.precision_from_arg) {
+        mask.push_back(false);
+      }
+      if (spec.conv == 'z') {
+        mask.push_back(false);
+        mask.push_back(false);
+        continue;
+      }
+      mask.push_back(IsFloatPrintConversion(spec.conv));
+    }
+    return mask;
+  }
+
   llvm_backend::Result EmitPrint(const HIRStmt& st, FunctionFrame* frame) {
     const std::string literal = !st.name.empty() ? st.name : st.print_format.text;
     if (!literal.empty() && literal.front() == '\'') {
@@ -2207,15 +2337,33 @@ class IrBuilderEmitter {
       return {false, "irbuilder emit: print format must be pointer-like"};
     }
 
+    std::vector<bool> float_arg_mask(st.print_args.size(), false);
+    if (!literal.empty() && literal.front() == '"') {
+      std::string format_error;
+      const std::vector<PrintFormatSpec> specs =
+          ParsePrintFormatSpecifiers(DecodeQuotedString(literal), &format_error);
+      if (!format_error.empty()) {
+        return {false, "irbuilder emit: " + format_error};
+      }
+      float_arg_mask = BuildPrintArgFloatMask(specs);
+      if (float_arg_mask.size() != st.print_args.size()) {
+        return {false, "irbuilder emit: print argument count mismatch for format string"};
+      }
+    }
+
     std::vector<llvm::Value*> coerced_args;
     coerced_args.reserve(st.print_args.size());
-    for (const HIRExpr& arg : st.print_args) {
+    for (std::size_t i = 0; i < st.print_args.size(); ++i) {
+      const HIRExpr& arg = st.print_args[i];
       const ExprResult value = EmitExpr(arg, frame);
       if (!value.ok) {
         return {false, value.message};
       }
-      llvm::Value* as_i64 = CoerceInt64(value.value);
+      llvm::Value* as_i64 = PackPrintArg(value.value, float_arg_mask[i]);
       if (as_i64 == nullptr) {
+        if (float_arg_mask[i]) {
+          return {false, "irbuilder emit: print argument is not float-convertible"};
+        }
         return {false, "irbuilder emit: print argument is not integer/pointer-convertible"};
       }
       coerced_args.push_back(as_i64);
@@ -2757,6 +2905,28 @@ class IrBuilderEmitter {
     return nullptr;
   }
 
+  llvm::Value* CoerceFloat64(llvm::Value* value) {
+    if (value == nullptr) {
+      return nullptr;
+    }
+
+    llvm::Type* f64 = llvm::Type::getDoubleTy(*context_);
+    if (value->getType()->isDoubleTy()) {
+      return value;
+    }
+    if (value->getType()->isFloatingPointTy()) {
+      return builder_.CreateFPCast(value, f64);
+    }
+    if (value->getType()->isIntegerTy()) {
+      return builder_.CreateSIToFP(value, f64);
+    }
+    if (value->getType()->isPointerTy()) {
+      llvm::Value* as_i64 = builder_.CreatePtrToInt(value, TypeI64());
+      return builder_.CreateSIToFP(as_i64, f64);
+    }
+    return nullptr;
+  }
+
   llvm::Value* CoerceInt64(llvm::Value* value) {
     if (value == nullptr) {
       return nullptr;
@@ -2775,6 +2945,17 @@ class IrBuilderEmitter {
     }
 
     return nullptr;
+  }
+
+  llvm::Value* PackPrintArg(llvm::Value* value, bool expect_float) {
+    if (expect_float) {
+      llvm::Value* as_f64 = CoerceFloat64(value);
+      if (as_f64 == nullptr) {
+        return nullptr;
+      }
+      return builder_.CreateBitCast(as_f64, TypeI64());
+    }
+    return CoerceInt64(value);
   }
 
   llvm::Value* ToBool(llvm::Value* value) {

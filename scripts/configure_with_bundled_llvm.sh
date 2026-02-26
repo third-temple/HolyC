@@ -131,7 +131,6 @@ fi
 
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-  -DHOLYC_ENABLE_LLVM=ON \
   -DHOLYC_BUNDLED_LLVM_CONFIG_DIR="${LLVM_CMAKE_DIR}"
 
 cmake --build "${BUILD_DIR}" --parallel

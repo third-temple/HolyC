@@ -22,9 +22,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHOLYC_ENABLE_LLVM=OFF
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -151,9 +153,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Configure
-        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOLYC_ENABLE_LLVM=OFF
+        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
       - name: Build
         run: cmake --build build-asan --parallel

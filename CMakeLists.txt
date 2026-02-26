@@ -299,6 +299,16 @@ if(BUILD_TESTING)
   )
   set_tests_properties(holyc.check.permissive PROPERTIES PASS_REGULAR_EXPRESSION "ok")
   add_test(
+    NAME holyc.check.strict-decl-modifiers
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/decl_modifiers.HC"
+  )
+  set_tests_properties(holyc.check.strict-decl-modifiers PROPERTIES WILL_FAIL TRUE)
+  add_test(
+    NAME holyc.check.permissive-decl-modifiers
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/decl_modifiers.HC" --permissive
+  )
+  set_tests_properties(holyc.check.permissive-decl-modifiers PROPERTIES PASS_REGULAR_EXPRESSION "ok")
+  add_test(
     NAME holyc.check.syntax-error
     COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/invalid_missing_semi.HC"
   )
@@ -306,31 +316,31 @@ if(BUILD_TESTING)
 
   add_test(
     NAME holyc.check.ref-exceptions
-    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/.ref/holyc-docs/HC/Exceptions.HC"
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/holyc_docs/Exceptions.HC"
   )
   set_tests_properties(holyc.check.ref-exceptions PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
   add_test(
     NAME holyc.check.ref-lastclass
-    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/.ref/holyc-docs/HC/LastClass.HC"
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/holyc_docs/LastClass.HC"
   )
   set_tests_properties(holyc.check.ref-lastclass PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
   add_test(
     NAME holyc.check.ref-lock
-    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/.ref/holyc-docs/HC/Lock.HC"
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/holyc_docs/Lock.HC"
   )
   set_tests_properties(holyc.check.ref-lock PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
   add_test(
     NAME holyc.check.ref-stkgrow
-    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/.ref/holyc-docs/HC/StkGrow.HC"
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/holyc_docs/StkGrow.HC"
   )
   set_tests_properties(holyc.check.ref-stkgrow PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
   add_test(
     NAME holyc.check.ref-classmeta
-    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/.ref/holyc-docs/HC/ClassMeta.HC"
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/holyc_docs/ClassMeta.HC"
   )
   set_tests_properties(holyc.check.ref-classmeta PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
@@ -345,6 +355,11 @@ if(BUILD_TESTING)
     COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/print_star_width_precision.HC"
   )
   set_tests_properties(holyc.check.print-star-width-precision PROPERTIES PASS_REGULAR_EXPRESSION "ok")
+  add_test(
+    NAME holyc.check.print-float-formats
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/print_float_formats.HC"
+  )
+  set_tests_properties(holyc.check.print-float-formats PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
   add_test(
     NAME holyc.check.anon-aggregate-trailing
@@ -421,6 +436,15 @@ if(BUILD_TESTING)
     COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/invalid_missing_semi.HC"
   )
   set_tests_properties(holyc.ast-dump.syntax-error PROPERTIES WILL_FAIL TRUE)
+  add_test(
+    NAME holyc.ast-dump.invalid-unterminated-block-comment
+    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/invalid_unterminated_block_comment.HC"
+  )
+  set_tests_properties(
+    holyc.ast-dump.invalid-unterminated-block-comment
+    PROPERTIES
+      WILL_FAIL TRUE
+  )
 
   add_test(
     NAME holyc.ast-dump.semantics
@@ -471,7 +495,7 @@ if(BUILD_TESTING)
 
   add_test(
     NAME holyc.ast-dump.linkage-forms
-    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/linkage_forms.HC"
+    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/linkage_forms.HC" --permissive
   )
 
   add_test(
@@ -581,7 +605,7 @@ if(BUILD_TESTING)
 
   add_test(
     NAME holyc.ast-dump.decl-modifiers
-    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/decl_modifiers.HC"
+    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/decl_modifiers.HC" --permissive
   )
 
   add_test(
@@ -713,6 +737,11 @@ if(BUILD_TESTING)
   add_test(
     NAME holyc.ast-dump.public-modifier
     COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/invalid_public_modifier.HC"
+  )
+  set_tests_properties(holyc.ast-dump.public-modifier PROPERTIES WILL_FAIL TRUE)
+  add_test(
+    NAME holyc.ast-dump.public-modifier-permissive
+    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/invalid_public_modifier.HC" --permissive
   )
 
   add_test(
@@ -1299,6 +1328,11 @@ if(BUILD_TESTING)
     COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/print_stmt_formats.HC"
   )
   set_tests_properties(holyc.jit.print-stmt-formats PROPERTIES PASS_REGULAR_EXPRESSION "T")
+  add_test(
+    NAME holyc.jit.print-float-formats
+    COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/print_float_formats.HC"
+  )
+  set_tests_properties(holyc.jit.print-float-formats PROPERTIES PASS_REGULAR_EXPRESSION "7\\.00 7\\.0e\\+00 7")
 
   add_test(
     NAME holyc.jit.adjacent-string-literals
@@ -1314,7 +1348,7 @@ if(BUILD_TESTING)
 
   add_test(
     NAME holyc.jit.decl-modifiers
-    COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/decl_modifiers.HC"
+    COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/decl_modifiers.HC" --permissive
   )
   set_tests_properties(holyc.jit.decl-modifiers PROPERTIES PASS_REGULAR_EXPRESSION "3")
 

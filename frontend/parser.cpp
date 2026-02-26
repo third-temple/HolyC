@@ -118,15 +118,23 @@ class Lexer {
       }
 
       if (c == '/' && PeekNext() == '*') {
+        const int comment_line = line_;
+        const int comment_col = col_;
         Advance();
         Advance();
+        bool terminated = false;
         while (!AtEnd()) {
           if (Peek() == '*' && PeekNext() == '/') {
             Advance();
             Advance();
+            terminated = true;
             break;
           }
           Advance();
+        }
+        if (!terminated) {
+          throw std::runtime_error(
+              FormatError("HC2003", comment_line, comment_col, "unterminated block comment"));
         }
         continue;
       }

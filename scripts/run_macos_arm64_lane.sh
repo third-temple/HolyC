@@ -159,7 +159,6 @@ if [[ "${USE_BUNDLED_LLVM}" -eq 1 ]]; then
 else
   cmake -S "${ROOT_DIR}" -B "${BUILD_DIR_ABS}" \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DHOLYC_ENABLE_LLVM=ON
   cmake --build "${BUILD_DIR_ABS}" --parallel
 fi
 

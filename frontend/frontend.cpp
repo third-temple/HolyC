@@ -241,11 +241,10 @@ void DumpHirModule(const HIRModule& module, std::ostringstream& out) {
 ParseResult ParseAndDumpAst(std::string_view source, std::string_view filename,
                             ExecutionMode mode, bool strict_mode) {
   try {
-    (void)strict_mode;
     const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
 
     const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    const TypedNode root = internal::AnalyzeSemantics(parsed, filename);
+    const TypedNode root = internal::AnalyzeSemantics(parsed, filename, strict_mode);
 
     std::ostringstream out;
     DumpNode(root, 0, out);
@@ -256,9 +255,8 @@ ParseResult ParseAndDumpAst(std::string_view source, std::string_view filename,
 }
 
 ParseResult PreprocessSource(std::string_view source, std::string_view filename,
-                             ExecutionMode mode, bool strict_mode) {
+                             ExecutionMode mode, bool /*strict_mode*/) {
   try {
-    (void)strict_mode;
     return ParseResult{true, internal::RunPreprocessor(source, filename, mode)};
   } catch (const std::exception& ex) {
     return ParseResult{false, ex.what()};
@@ -268,10 +266,9 @@ ParseResult PreprocessSource(std::string_view source, std::string_view filename,
 ParseResult CheckSource(std::string_view source, std::string_view filename,
                         ExecutionMode mode, bool strict_mode) {
   try {
-    (void)strict_mode;
     const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
     const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    (void)internal::AnalyzeSemantics(parsed, filename);
+    (void)internal::AnalyzeSemantics(parsed, filename, strict_mode);
     return ParseResult{true, "ok\n"};
   } catch (const std::exception& ex) {
     return ParseResult{false, ex.what()};
@@ -281,10 +278,9 @@ ParseResult CheckSource(std::string_view source, std::string_view filename,
 ParseResult EmitHir(std::string_view source, std::string_view filename, ExecutionMode mode,
                     bool strict_mode) {
   try {
-    (void)strict_mode;
     const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
     const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    const TypedNode root = internal::AnalyzeSemantics(parsed, filename);
+    const TypedNode root = internal::AnalyzeSemantics(parsed, filename, strict_mode);
     const HIRModule module = internal::LowerToHir(root, filename);
 
     std::ostringstream out;
@@ -298,11 +294,10 @@ ParseResult EmitHir(std::string_view source, std::string_view filename, Executio
 ParseResult EmitLlvmIr(std::string_view source, std::string_view filename,
                        ExecutionMode mode, bool strict_mode) {
   try {
-    (void)strict_mode;
     const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
 
     const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    const TypedNode root = internal::AnalyzeSemantics(parsed, filename);
+    const TypedNode root = internal::AnalyzeSemantics(parsed, filename, strict_mode);
 
     const HIRModule module = internal::LowerToHir(root, filename);
 

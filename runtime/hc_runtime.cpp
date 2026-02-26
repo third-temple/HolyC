@@ -662,6 +662,13 @@ void hc_print_fmt(const char* format, const std::int64_t* args, std::size_t arg_
         std::fprintf(stdout, spec, value);
       }
     };
+    auto unpack_double = [](std::int64_t raw) {
+      const std::uint64_t bits = static_cast<std::uint64_t>(raw);
+      double value = 0.0;
+      static_assert(sizeof(value) == sizeof(bits), "double payload size mismatch");
+      std::memcpy(&value, &bits, sizeof(value));
+      return value;
+    };
 
     if (conv == 'z') {
       const std::int64_t idx = next_arg();
@@ -717,7 +724,7 @@ void hc_print_fmt(const char* format, const std::int64_t* args, std::size_t arg_
       case 'E':
       case 'g':
       case 'G':
-        print_double(spec, static_cast<double>(next_arg()));
+        print_double(spec, unpack_double(next_arg()));
         break;
       default:
         std::fwrite(format + spec_begin, 1, i - spec_begin, stdout);
