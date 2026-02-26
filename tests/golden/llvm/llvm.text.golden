@@ -1,0 +1,34 @@
+; ModuleID = 'holyc'
+source_filename = "holyc"
+
+define i64 @Add(i64 %a, i64 %b) {
+entry:
+  %t1 = alloca i64
+  store i64 %a, i64* %t1
+  %t2 = alloca i64
+  store i64 %b, i64* %t2
+  %t3 = load i64, i64* %t1
+  %t4 = load i64, i64* %t2
+  %t5 = add i64 %t3, %t4
+  ret i64 %t5
+}
+
+define i64 @Main() {
+entry:
+  %t1 = alloca i64
+  store i64 2, i64* %t1
+  %t2 = alloca i64
+  store i64 3, i64* %t2
+  %t3 = load i64, i64* %t1
+  %t4 = load i64, i64* %t2
+  %t5 = call i64 @Add(i64 %t3, i64 %t4)
+  %t6 = add i64 %t5, 1
+  ret i64 %t6
+}
+
+define i32 @main() {
+entry:
+  %tmain = call i64 @Main()
+  %ttrunc = trunc i64 %tmain to i32
+  ret i32 %ttrunc
+}

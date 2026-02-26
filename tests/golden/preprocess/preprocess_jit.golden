@@ -1,0 +1,14 @@
+U0 Included()
+{
+  "inc\n";
+}
+I64 Generated(){ return 7; }
+
+U0 Main()
+{
+  "jit\n";
+  Included;
+  Generated;
+}
+
+Main;

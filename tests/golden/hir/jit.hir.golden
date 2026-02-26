@@ -1,0 +1,20 @@
+HIRModule
+  Function: Add -> I64
+    Param: I64 a
+    Param: I64 b
+    Return [type=I64]
+      Expr(binary): + [type=I64]
+        Expr(var): a [type=I64]
+        Expr(var): b [type=I64]
+  Function: Main -> I64
+    VarDecl: x [type=I64] [storage=local] [const-init]
+      Expr(int-literal): 2 [type=I64]
+    VarDecl: y [type=I64] [storage=local] [const-init]
+      Expr(int-literal): 3 [type=I64]
+    Return [type=I64]
+      Expr(binary): * [type=I64]
+        Expr(call): Add [type=I64]
+          Expr(var): x [type=I64]
+          Expr(var): y [type=I64]
+        Expr(int-literal): 2 [type=I64]
+  Reflection

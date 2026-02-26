@@ -1,0 +1,3 @@
+#pragma once
+
+#define HOLYC_VERSION "@PROJECT_VERSION@"

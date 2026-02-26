@@ -1,0 +1,55 @@
+Program: tests/samples/features.HC
+  FunctionDecl: U0 Test
+    ParamList
+      Param: I64 i
+        DeclType: I64
+        DeclName: i
+        Default: 4
+          Literal: 4
+      Param: I64 j
+        DeclType: I64
+        DeclName: j
+      Param: I64 k
+        DeclType: I64
+        DeclName: k
+        Default: 5
+          Literal: 5
+    Block
+      SwitchStmt
+        Identifier: j [type=I64]
+        Block
+          CaseClause: null-case
+            PrintStmt [type=U0]
+              Literal: "zero" [type=U8*]
+          BreakStmt
+          CaseClause: range-case
+            Literal: 4 [type=I64]
+            Literal: 7 [type=I64]
+            PrintStmt [type=U0]
+              Literal: "range" [type=U8*]
+          BreakStmt
+          StartLabel: start
+          PrintStmt [type=U0]
+            Literal: "[" [type=U8*]
+          CaseClause
+            Literal: 1 [type=I64]
+            PrintStmt [type=U0]
+              Literal: "one" [type=U8*]
+          BreakStmt
+          CaseClause
+            Literal: 3 [type=I64]
+            PrintStmt [type=U0]
+              Literal: "three" [type=U8*]
+          BreakStmt
+          EndLabel: end
+          PrintStmt [type=U0]
+            Literal: "]" [type=U8*]
+          BreakStmt
+    DeclType: U0
+    DeclName: Test
+  ExprStmt [type=U0]
+    CallExpr [type=U0]
+      Identifier: Test
+      CallArgs
+        EmptyArg
+        Literal: 3 [type=I64]

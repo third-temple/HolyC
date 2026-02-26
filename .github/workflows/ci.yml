@@ -1,0 +1,188 @@
+name: ci
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            label: linux-x86_64
+          - os: macos-14
+            label: macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.label }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHOLYC_ENABLE_LLVM=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --build-config Release
+
+  llvm-bundled-linux:
+    runs-on: ubuntu-24.04
+    name: llvm-bundled-linux
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore LLVM build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/llvm/build-linux-x86_64
+            third_party/llvm/install-linux-x86_64
+            third_party/llvm/build
+            third_party/llvm/install
+          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
+
+      - name: Build bundled LLVM
+        run: scripts/build_bundled_llvm.sh
+
+      - name: Configure with bundled LLVM
+        run: scripts/configure_with_bundled_llvm.sh
+
+      - name: Test with bundled LLVM
+        run: ctest --test-dir build --output-on-failure --build-config Release
+
+  llvm-bundled-macos:
+    runs-on: macos-14
+    name: llvm-bundled-macos
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore LLVM build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/llvm/build-macos-arm64
+            third_party/llvm/install-macos-arm64
+            third_party/llvm/build
+            third_party/llvm/install
+          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
+
+      - name: Build bundled LLVM
+        run: scripts/build_bundled_llvm.sh
+
+      - name: Configure with bundled LLVM
+        run: scripts/configure_with_bundled_llvm.sh
+
+      - name: Test with bundled LLVM
+        run: ctest --test-dir build --output-on-failure --build-config Release
+
+  sanitizers-macos-llvm:
+    runs-on: macos-14
+    name: sanitizers-macos-llvm
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore LLVM build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/llvm/build-macos-arm64
+            third_party/llvm/install-macos-arm64
+            third_party/llvm/build
+            third_party/llvm/install
+          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
+
+      - name: Build bundled LLVM
+        run: scripts/build_bundled_llvm.sh
+
+      - name: Sanitizer + hardening lane (bundled LLVM)
+        run: scripts/run_macos_arm64_llvm_sanitizer_lane.sh
+
+  release-gate-macos-arm64:
+    runs-on: macos-14
+    name: release-gate-macos-arm64
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore LLVM build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/llvm/build-macos-arm64
+            third_party/llvm/install-macos-arm64
+            third_party/llvm/build
+            third_party/llvm/install
+          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
+
+      - name: Full release gate (macOS ARM64)
+        run: scripts/run_full_gate.sh --profile macos-arm64 --macos-build-dir build-macos-arm64-llvm-lane --sanitizer-build-dir build-macos-arm64-llvm-asan
+
+  sanitizers-linux:
+    runs-on: ubuntu-24.04
+    name: sanitizers-linux
+
+    env:
+      CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+      CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+      LDFLAGS: -fsanitize=address,undefined
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOLYC_ENABLE_LLVM=OFF
+
+      - name: Build
+        run: cmake --build build-asan --parallel
+
+      - name: Test
+        run: ctest --test-dir build-asan --output-on-failure
+
+  format-lint:
+    runs-on: ubuntu-24.04
+    name: format-lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint
+        run: scripts/lint.sh
+
+  static-analysis:
+    runs-on: ubuntu-24.04
+    name: static-analysis
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run static analysis
+        run: scripts/static_analysis.sh

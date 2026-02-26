@@ -1,0 +1,6 @@
+// Adapted from .ref/holyc-docs/HC/Lock.HC
+
+I64 Main()
+{
+  return 0x1000000*2;
+}

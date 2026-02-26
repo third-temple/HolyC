@@ -1,0 +1,6 @@
+// Adapted from .ref/holyc-docs/HC/StkGrow.HC
+
+I64 Main()
+{
+  return (2*1024*1024);
+}

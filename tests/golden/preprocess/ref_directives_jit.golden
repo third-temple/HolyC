@@ -1,0 +1,7 @@
+// Adapted from .ref/holyc-docs/HC/Directives.HC
+I64 Main()
+{
+  I64 line = 4;
+  I64 cmd = 0;
+  return line + cmd;
+}
