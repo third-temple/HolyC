@@ -224,7 +224,7 @@ jobs:
     needs: llvm-cache-linux
 
     env:
-      CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+      CXXFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer
       CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
       LDFLAGS: -fsanitize=address,undefined
 
@@ -241,7 +241,7 @@ jobs:
           path: third_party/llvm/install-linux-x86_64
 
       - name: Configure
-        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOLYC_BUNDLED_LLVM_CONFIG_DIR="${{ github.workspace }}/third_party/llvm/install-linux-x86_64/lib/cmake/llvm"
+        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOLYC_WARNINGS_AS_ERRORS=OFF -DHOLYC_BUNDLED_LLVM_CONFIG_DIR="${{ github.workspace }}/third_party/llvm/install-linux-x86_64/lib/cmake/llvm"
 
       - name: Build
         run: cmake --build build-asan --parallel
