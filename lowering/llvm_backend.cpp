@@ -493,6 +493,7 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     }
     return Result{false, "jit: missing Main() function"};
   }
+  const std::size_t entry_arg_count = entry_fn->arg_size();
   const std::string entry_symbol = "__holyc_entry_" + std::to_string(++state.next_entry_id);
   entry_fn->setName(entry_symbol);
 
@@ -526,11 +527,11 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
   }
 
   int rc = 0;
-  if (entry_fn->arg_size() == 0) {
+  if (entry_arg_count == 0) {
     using MainFn = int (*)();
     MainFn main_fn = sym->toPtr<MainFn>();
     rc = main_fn();
-  } else if (entry_fn->arg_size() == 2) {
+  } else if (entry_arg_count == 2) {
     using MainFn = int (*)(int, char**);
     MainFn main_fn = sym->toPtr<MainFn>();
     const char* argv0 = "holyc-jit";
@@ -540,7 +541,8 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     if (reset_after_run) {
       sessions.erase(key);
     }
-    return Result{false, "jit: host entrypoint has unsupported signature"};
+    return Result{false, "jit: host entrypoint has unsupported signature (arg_count=" +
+                             std::to_string(entry_arg_count) + ")"};
   }
   if (reset_after_run) {
     sessions.erase(key);

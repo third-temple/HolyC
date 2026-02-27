@@ -700,12 +700,24 @@ void hc_print_fmt(const char* format, const std::int64_t* args, std::size_t arg_
       case 'o':
         print_unsigned(spec, static_cast<unsigned long long>(next_arg()));
         break;
-      case 'p':
-      case 'P': {
+      case 'p': {
         char pointer_spec[64];
         std::memcpy(pointer_spec, spec, spec_len + 1);
         pointer_spec[spec_len - 1] = 'p';
         void* ptr = reinterpret_cast<void*>(static_cast<std::uintptr_t>(next_arg()));
+        print_pointer(pointer_spec, ptr);
+        break;
+      }
+      case 'P': {
+        const std::uintptr_t raw = static_cast<std::uintptr_t>(next_arg());
+        if (raw == 0) {
+          std::fputs("0x0", stdout);
+          break;
+        }
+        char pointer_spec[64];
+        std::memcpy(pointer_spec, spec, spec_len + 1);
+        pointer_spec[spec_len - 1] = 'p';
+        void* ptr = reinterpret_cast<void*>(raw);
         print_pointer(pointer_spec, ptr);
         break;
       }
