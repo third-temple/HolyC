@@ -533,7 +533,10 @@ void* SpawnThreadMain(void* opaque) {
 void TaskSpawnCommandEntry(const char* command_data) {
   char* command = const_cast<char*>(command_data);
   if (command != nullptr && command[0] != '\0') {
-    (void)std::system(command);
+    const int system_rc = std::system(command);
+    if (system_rc == -1) {
+      std::fprintf(stderr, "warning: Spawn command launch failed: %s\n", command);
+    }
   }
   std::free(command);
 }
