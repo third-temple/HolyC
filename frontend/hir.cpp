@@ -121,6 +121,23 @@ std::string QuoteStringLiteral(std::string_view text) {
   return out;
 }
 
+Node MakeIntLiteralNode(std::string_view text) {
+  Node n;
+  n.kind = "Literal";
+  n.text = std::string(text);
+  n.type = "I64";
+  return n;
+}
+
+Node MakeNegOneNode() {
+  Node n;
+  n.kind = "UnaryExpr";
+  n.text = "-";
+  n.type = "I64";
+  n.children.push_back(MakeIntLiteralNode("1"));
+  return n;
+}
+
 std::string StripDeclModifiers(std::string_view decl_text) {
   static const std::unordered_set<std::string> kCompatModifiers = {
       "public", "interrupt", "noreg", "reg", "no_warn",
@@ -342,6 +359,44 @@ class HIRLowerer {
   void CollectFunctionSignatures(const Node& program) {
     functions_.clear();
     function_order_.clear();
+
+    auto add_builtin_function = [&](FunctionSig sig) {
+      if (functions_.find(sig.name) != functions_.end()) {
+        return;
+      }
+      function_order_.push_back(sig.name);
+      functions_[sig.name] = std::move(sig);
+    };
+
+    {
+      FunctionSig callstkgrow;
+      callstkgrow.return_type = "I64";
+      callstkgrow.name = "CallStkGrow";
+      callstkgrow.linkage_kind = "external";
+      callstkgrow.params.push_back(ParamSig{"I64", "stack_min", false, Node{}});
+      callstkgrow.params.push_back(ParamSig{"I64", "stack_max", false, Node{}});
+      callstkgrow.params.push_back(ParamSig{"U8*", "fn", false, Node{}});
+      callstkgrow.params.push_back(ParamSig{"I64", "a0", false, Node{}});
+      callstkgrow.params.push_back(ParamSig{"I64", "a1", true, MakeIntLiteralNode("0")});
+      callstkgrow.params.push_back(ParamSig{"I64", "a2", true, MakeIntLiteralNode("0")});
+      add_builtin_function(std::move(callstkgrow));
+    }
+
+    {
+      FunctionSig spawn;
+      spawn.return_type = "CTask *";
+      spawn.name = "Spawn";
+      spawn.linkage_kind = "external";
+      spawn.params.push_back(ParamSig{"U8*", "fp_start_addr", false, Node{}});
+      spawn.params.push_back(ParamSig{"U8*", "data", true, MakeIntLiteralNode("0")});
+      spawn.params.push_back(ParamSig{"U8*", "task_name", true, MakeIntLiteralNode("0")});
+      spawn.params.push_back(ParamSig{"I64", "target_cpu", true, MakeNegOneNode()});
+      spawn.params.push_back(ParamSig{"CTask *", "parent", true, MakeIntLiteralNode("0")});
+      spawn.params.push_back(ParamSig{"I64", "stk_size", true, MakeIntLiteralNode("0")});
+      spawn.params.push_back(ParamSig{"I64", "flags", true, MakeIntLiteralNode("1")});
+      add_builtin_function(std::move(spawn));
+    }
+
     for (const Node& child : program.children) {
       if (child.kind != "FunctionDecl") {
         continue;

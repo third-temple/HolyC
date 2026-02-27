@@ -685,6 +685,11 @@ if(BUILD_TESTING)
   )
 
   add_test(
+    NAME holyc.ast-dump.spawn-runtime
+    COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/spawn_runtime.HC"
+  )
+
+  add_test(
     NAME holyc.ast-dump.metadata-runtime-apis
     COMMAND $<TARGET_FILE:holyc> ast-dump "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/metadata_runtime_apis.HC"
   )
@@ -1205,6 +1210,12 @@ if(BUILD_TESTING)
     set_tests_properties(holyc.emit-llvm.job-queue-runtime PROPERTIES PASS_REGULAR_EXPRESSION "call ptr @JobQue")
 
     add_test(
+      NAME holyc.emit-llvm.spawn-runtime
+      COMMAND $<TARGET_FILE:holyc> emit-llvm "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/spawn_runtime.HC"
+    )
+    set_tests_properties(holyc.emit-llvm.spawn-runtime PROPERTIES PASS_REGULAR_EXPRESSION "call ptr @Spawn")
+
+    add_test(
       NAME holyc.emit-llvm.metadata-runtime-apis
       COMMAND $<TARGET_FILE:holyc> emit-llvm "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/metadata_runtime_apis.HC"
     )
@@ -1457,6 +1468,12 @@ if(BUILD_TESTING)
       COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/job_queue_runtime.HC" --jit-backend=llvm
     )
     set_tests_properties(holyc.jit.llvm.job-queue-runtime PROPERTIES PASS_REGULAR_EXPRESSION "2")
+
+    add_test(
+      NAME holyc.jit.llvm.spawn-runtime
+      COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/spawn_runtime.HC" --jit-backend=llvm
+    )
+    set_tests_properties(holyc.jit.llvm.spawn-runtime PROPERTIES PASS_REGULAR_EXPRESSION "1")
 
     add_test(
       NAME holyc.jit.llvm.metadata-runtime-apis
@@ -1718,6 +1735,11 @@ if(BUILD_TESTING)
     add_test(
       NAME holyc.diff.job-queue-runtime
       COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/run_diff_test.sh" $<TARGET_FILE:holyc> "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/job_queue_runtime.HC"
+    )
+
+    add_test(
+      NAME holyc.diff.spawn-runtime
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/differential/run_diff_test.sh" $<TARGET_FILE:holyc> "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/spawn_runtime.HC"
     )
 
     add_test(

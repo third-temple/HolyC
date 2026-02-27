@@ -812,6 +812,14 @@ class SemanticAnalyzer {
     add_builtin_function("MemberMetaFind", "I64",
                          {ParamSig{"U8*", "key", false},
                           ParamSig{"CMemberLst *", "ml", false}});
+    add_builtin_function("Spawn", "CTask *",
+                         {ParamSig{"U8*", "fp_start_addr", false},
+                          ParamSig{"U8*", "data", true},
+                          ParamSig{"U8*", "task_name", true},
+                          ParamSig{"I64", "target_cpu", true},
+                          ParamSig{"CTask *", "parent", true},
+                          ParamSig{"I64", "stk_size", true},
+                          ParamSig{"I64", "flags", true}});
     add_builtin_function("JobQue", "CJob *",
                          {ParamSig{"U8*", "fn", false},
                           ParamSig{"U8*", "arg", false},

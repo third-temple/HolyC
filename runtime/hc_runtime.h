@@ -44,11 +44,14 @@ void* hc_memcpy(void* dst, const void* src, std::size_t size);
 void* hc_memset(void* dst, int value, std::size_t size);
 
 typedef struct CJob CJob;
+typedef struct CTask CTask;
 typedef struct CHashClass CHashClass;
 typedef struct CMemberLst CMemberLst;
 
 std::int64_t CallStkGrow(std::int64_t stack_min, std::int64_t stack_max, const char* fn,
                          std::int64_t a0, std::int64_t a1, std::int64_t a2);
+CTask* Spawn(const char* fn, const char* data, const char* task_name, std::int64_t target_cpu,
+             CTask* parent, std::int64_t stk_size, std::int64_t flags);
 CJob* JobQue(const char* fn, const char* arg, std::int64_t cpu, std::int64_t flags);
 std::int64_t JobResGet(CJob* job);
 CHashClass* HashFind(const char* name, const char* table, std::int64_t kind);

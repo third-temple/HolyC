@@ -186,6 +186,8 @@ llvm_backend::Result RegisterRuntimeSymbols(llvm::orc::LLJIT& jit, llvm::orc::JI
       llvm::orc::ExecutorSymbolDef::fromPtr(&hc_memset, exported);
   symbols[mangle("CallStkGrow")] =
       llvm::orc::ExecutorSymbolDef::fromPtr(&CallStkGrow, exported);
+  symbols[mangle("Spawn")] =
+      llvm::orc::ExecutorSymbolDef::fromPtr(&Spawn, exported);
   symbols[mangle("JobQue")] =
       llvm::orc::ExecutorSymbolDef::fromPtr(&JobQue, exported);
   symbols[mangle("JobResGet")] =

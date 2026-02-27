@@ -1,5 +1,6 @@
 #include "hc_runtime.h"
 
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -11,6 +12,7 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 
 extern "C" {
@@ -44,6 +46,11 @@ struct CJob {
   int joined;
 };
 
+struct HcSpawnRequest {
+  const char* fn;
+  const char* data;
+};
+
 namespace {
 
 thread_local hc_try_frame* g_try_stack = nullptr;
@@ -52,6 +59,7 @@ thread_local const hc_reflection_field* g_reflection_fields = nullptr;
 thread_local std::size_t g_reflection_field_count = 0;
 thread_local CHashClass* g_hash_classes = nullptr;
 thread_local bool g_reflection_cache_ready = false;
+std::atomic<std::int64_t> g_next_task_id{1};
 
 const char* LookupZString(const char* table, std::int64_t index) {
   if (table == nullptr || index < 0) {
@@ -508,6 +516,49 @@ void* JobThreadMain(void* opaque) {
   return nullptr;
 }
 
+void* SpawnThreadMain(void* opaque) {
+  HcSpawnRequest* req = static_cast<HcSpawnRequest*>(opaque);
+  if (req == nullptr) {
+    return nullptr;
+  }
+  if (req->fn != nullptr) {
+    using SpawnFn = void (*)(const char*);
+    SpawnFn fn = reinterpret_cast<SpawnFn>(reinterpret_cast<std::uintptr_t>(req->fn));
+    fn(req->data);
+  }
+  std::free(req);
+  return nullptr;
+}
+
+void TaskSpawnCommandEntry(const char* command_data) {
+  char* command = const_cast<char*>(command_data);
+  if (command != nullptr && command[0] != '\0') {
+    (void)std::system(command);
+  }
+  std::free(command);
+}
+
+std::size_t NormalizeStackSize(std::int64_t requested_size) {
+  if (requested_size <= 0) {
+    return 0;
+  }
+  std::size_t stack_size = static_cast<std::size_t>(requested_size);
+  if (stack_size < static_cast<std::size_t>(PTHREAD_STACK_MIN)) {
+    stack_size = static_cast<std::size_t>(PTHREAD_STACK_MIN);
+  }
+#if defined(_SC_PAGESIZE)
+  const long page_size = ::sysconf(_SC_PAGESIZE);
+  if (page_size > 0) {
+    const std::size_t page = static_cast<std::size_t>(page_size);
+    const std::size_t rem = stack_size % page;
+    if (rem != 0) {
+      stack_size += page - rem;
+    }
+  }
+#endif
+  return stack_size;
+}
+
 }  // namespace
 
 std::int64_t hc_runtime_abi_version() {
@@ -845,6 +896,54 @@ std::int64_t CallStkGrow(std::int64_t stack_min, std::int64_t stack_max, const c
   return callee(a0, a1, a2);
 }
 
+CTask* Spawn(const char* fn, const char* data, const char* task_name, std::int64_t target_cpu,
+             CTask* parent, std::int64_t stk_size, std::int64_t flags) {
+  (void)task_name;
+  (void)target_cpu;
+  (void)parent;
+  (void)flags;
+  if (fn == nullptr) {
+    return nullptr;
+  }
+
+  HcSpawnRequest* req = static_cast<HcSpawnRequest*>(std::calloc(1, sizeof(HcSpawnRequest)));
+  if (req == nullptr) {
+    return nullptr;
+  }
+  req->fn = fn;
+  req->data = data;
+
+  pthread_attr_t attr;
+  pthread_attr_t* attr_ptr = nullptr;
+  bool attr_initialized = false;
+  if (pthread_attr_init(&attr) == 0) {
+    attr_initialized = true;
+    const std::size_t normalized_stack_size = NormalizeStackSize(stk_size);
+    if (normalized_stack_size > 0 &&
+        pthread_attr_setstacksize(&attr, normalized_stack_size) != 0) {
+      pthread_attr_destroy(&attr);
+      std::free(req);
+      return nullptr;
+    }
+    attr_ptr = &attr;
+  }
+
+  pthread_t thread{};
+  const int rc = pthread_create(&thread, attr_ptr, SpawnThreadMain, req);
+  if (attr_initialized) {
+    pthread_attr_destroy(&attr);
+  }
+  if (rc != 0) {
+    std::free(req);
+    return nullptr;
+  }
+  pthread_detach(thread);
+
+  const std::uintptr_t task_id = static_cast<std::uintptr_t>(
+      g_next_task_id.fetch_add(1, std::memory_order_relaxed));
+  return reinterpret_cast<CTask*>(task_id);
+}
+
 CJob* JobQue(const char* fn, const char* arg, std::int64_t cpu, std::int64_t flags) {
   (void)cpu;
   (void)flags;
@@ -909,9 +1008,23 @@ std::int64_t MemberMetaFind(const char* key, const CMemberLst* member) {
 }
 
 std::int64_t hc_task_spawn(const char* task_name) {
-  std::fprintf(stderr, "unsupported runtime feature: task spawn (%s)\n",
-               task_name == nullptr ? "<null>" : task_name);
-  return -1;
+  if (task_name == nullptr || task_name[0] == '\0') {
+    return -1;
+  }
+
+  char* command_copy = CopyCString(task_name);
+  if (command_copy == nullptr) {
+    return -1;
+  }
+
+  const CTask* task = Spawn(
+      reinterpret_cast<const char*>(reinterpret_cast<std::uintptr_t>(&TaskSpawnCommandEntry)),
+      command_copy, task_name, -1, nullptr, 0, 0);
+  if (task == nullptr) {
+    std::free(command_copy);
+    return -1;
+  }
+  return static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(task));
 }
 
 }  // extern "C"

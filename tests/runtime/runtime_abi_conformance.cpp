@@ -1,12 +1,16 @@
 #include "hc_runtime.h"
 
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <thread>
 
 namespace {
 
 volatile std::int64_t g_job_seen = 0;
+std::atomic<std::int64_t> g_spawn_seen{0};
 
 extern "C" std::int64_t AbiConformanceFn(std::int64_t a0, std::int64_t a1, std::int64_t a2) {
   return a0 + a1 + a2;
@@ -14,6 +18,11 @@ extern "C" std::int64_t AbiConformanceFn(std::int64_t a0, std::int64_t a1, std::
 
 extern "C" void AbiConformanceJob(std::int64_t arg) {
   g_job_seen = arg;
+}
+
+extern "C" void AbiConformanceSpawn(const char* arg) {
+  g_spawn_seen.store(static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(arg)),
+                     std::memory_order_release);
 }
 
 struct CHashClassView {
@@ -90,23 +99,40 @@ int main() {
     return 12;
   }
 
+  CTask* task = Spawn(
+      reinterpret_cast<const char*>(reinterpret_cast<std::uintptr_t>(&AbiConformanceSpawn)),
+      reinterpret_cast<const char*>(static_cast<std::uintptr_t>(23)), "abi-spawn", -1, nullptr, 0,
+      0);
+  if (task == nullptr) {
+    return 13;
+  }
+  for (int i = 0; i < 2000; ++i) {
+    if (g_spawn_seen.load(std::memory_order_acquire) == 23) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (g_spawn_seen.load(std::memory_order_acquire) != 23) {
+    return 14;
+  }
+
   CHashClass* demo = HashFind("Demo", nullptr, 0);
   if (demo == nullptr) {
-    return 13;
+    return 15;
   }
   CMemberLst* member = reinterpret_cast<CHashClassView*>(demo)->member_lst_and_root;
   if (member == nullptr) {
-    return 14;
-  }
-  if (MemberMetaFind("dft_val", member) == 0) {
-    return 15;
-  }
-  if (MemberMetaData("dft_val", member) != 9) {
     return 16;
   }
-
-  if (hc_task_spawn("abi-conformance") != -1) {
+  if (MemberMetaFind("dft_val", member) == 0) {
     return 17;
+  }
+  if (MemberMetaData("dft_val", member) != 9) {
+    return 18;
+  }
+
+  if (hc_task_spawn(":") <= 0) {
+    return 19;
   }
 
   return 0;
