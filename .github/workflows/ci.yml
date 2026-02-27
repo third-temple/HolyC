@@ -16,11 +16,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Resolve pinned LLVM gitlink
+        id: llvm-pin
+        run: echo "sha=$(git rev-parse :third_party/llvm)" >> "${GITHUB_OUTPUT}"
+
       - name: Restore LLVM install cache
         uses: actions/cache@v4
         with:
           path: third_party/llvm/install-linux-x86_64
-          key: llvm-install-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/llvm/llvm/CMakeLists.txt', 'scripts/build_bundled_llvm.sh') }}
+          key: llvm-install-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('scripts/build_bundled_llvm.sh') }}
 
       - name: Ensure bundled LLVM install
         run: |
@@ -47,11 +51,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Resolve pinned LLVM gitlink
+        id: llvm-pin
+        run: echo "sha=$(git rev-parse :third_party/llvm)" >> "${GITHUB_OUTPUT}"
+
       - name: Restore LLVM install cache
         uses: actions/cache@v4
         with:
           path: third_party/llvm/install-darwin-arm64
-          key: llvm-install-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/llvm/llvm/CMakeLists.txt', 'scripts/build_bundled_llvm.sh') }}
+          key: llvm-install-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('scripts/build_bundled_llvm.sh') }}
 
       - name: Ensure bundled LLVM install
         run: |
