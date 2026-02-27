@@ -109,15 +109,13 @@ std::string Quote(std::string_view value) {
 }
 #endif
 
-std::string BasenameNoExt(std::string_view path) {
-  const std::string p(path);
-  const std::size_t slash = p.find_last_of("/\\");
-  const std::string file = (slash == std::string::npos) ? p : p.substr(slash + 1);
-  const std::size_t dot = file.find_last_of('.');
-  if (dot == std::string::npos) {
-    return file;
+std::string ArtifactBaseName(std::string_view output_path) {
+  const std::filesystem::path output{std::string(output_path)};
+  const std::string filename = output.filename().string();
+  if (!filename.empty()) {
+    return filename;
   }
-  return file.substr(0, dot);
+  return "holyc-output";
 }
 
 std::string SessionKey(std::string_view session_name) {
@@ -408,7 +406,7 @@ Result BuildExecutableFromIr(std::string_view ir_text, std::string_view output_p
     return Result{false, "failed to create artifact directory: " + obj_dir.string()};
   }
   const std::string obj_path =
-      (obj_dir / (BasenameNoExt(output_path) + ".o")).string();
+      (obj_dir / (ArtifactBaseName(output_path) + ".o")).string();
   std::error_code ec;
   llvm::raw_fd_ostream obj_out(obj_path, ec, llvm::sys::fs::OF_None);
   if (ec) {

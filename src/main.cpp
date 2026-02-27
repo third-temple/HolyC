@@ -172,6 +172,15 @@ std::string BasenameNoExt(std::string_view path) {
   return file.substr(0, dot);
 }
 
+std::string ArtifactBaseName(std::string_view output_path) {
+  const std::filesystem::path output{std::string(output_path)};
+  const std::string filename = output.filename().string();
+  if (!filename.empty()) {
+    return filename;
+  }
+  return BasenameNoExt(output_path);
+}
+
 bool TryParseModeArg(std::string_view arg, holyc::frontend::ExecutionMode* mode_out,
                      std::string* error) {
   constexpr std::string_view prefix = "--mode=";
@@ -274,7 +283,7 @@ int BuildExecutable(std::string_view input_path, std::string_view output_path,
   }
 
   const std::string artifact_base =
-      (std::filesystem::path(std::string(artifact_dir)) / BasenameNoExt(output_path)).string();
+      (std::filesystem::path(std::string(artifact_dir)) / ArtifactBaseName(output_path)).string();
   const std::string ll_path = artifact_base + ".ll";
   if (!WriteFile(ll_path, ir.output)) {
     std::cerr << "error: cannot write LLVM IR file: " << ll_path << "\n";

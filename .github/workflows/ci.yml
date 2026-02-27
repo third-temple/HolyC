@@ -172,6 +172,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Lint
         run: scripts/lint.sh
