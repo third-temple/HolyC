@@ -224,7 +224,7 @@ jobs:
     needs: llvm-cache-linux
 
     env:
-      CXXFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer
+      CXXFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -fno-rtti
       CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
       LDFLAGS: -fsanitize=address,undefined
 
