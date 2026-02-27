@@ -39,7 +39,7 @@ detect_profile() {
 PROFILE=""
 BUILD_DIR="${ROOT_DIR}/build"
 BUILD_TYPE="Release"
-LLVM_CMAKE_DIR=""
+LLVM_CMAKE_DIR="${HOLYC_BUNDLED_LLVM_CONFIG_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -114,11 +114,14 @@ fi
 require_tool cmake
 
 if [[ -z "${LLVM_CMAKE_DIR}" ]]; then
-  LLVM_CMAKE_DIR="${ROOT_DIR}/third_party/llvm/build-${PROFILE}/lib/cmake/llvm"
+  LLVM_CMAKE_DIR="${ROOT_DIR}/third_party/llvm/install-${PROFILE}/lib/cmake/llvm"
   if [[ ! -f "${LLVM_CMAKE_DIR}/LLVMConfig.cmake" ]]; then
-    LEGACY_LLVM_CMAKE_DIR="${ROOT_DIR}/third_party/llvm/build/lib/cmake/llvm"
-    if [[ -f "${LEGACY_LLVM_CMAKE_DIR}/LLVMConfig.cmake" ]]; then
-      LLVM_CMAKE_DIR="${LEGACY_LLVM_CMAKE_DIR}"
+    LLVM_CMAKE_DIR="${ROOT_DIR}/third_party/llvm/build-${PROFILE}/lib/cmake/llvm"
+    if [[ ! -f "${LLVM_CMAKE_DIR}/LLVMConfig.cmake" ]]; then
+      LEGACY_LLVM_CMAKE_DIR="${ROOT_DIR}/third_party/llvm/build/lib/cmake/llvm"
+      if [[ -f "${LEGACY_LLVM_CMAKE_DIR}/LLVMConfig.cmake" ]]; then
+        LLVM_CMAKE_DIR="${LEGACY_LLVM_CMAKE_DIR}"
+      fi
     fi
   fi
 fi

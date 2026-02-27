@@ -16,6 +16,7 @@ Options:
   --macos-build-dir <path>   Host CMake build directory (default: build-<host-profile>)
   --build-type <type>        CMake build type (default: Release)
   --profile <name>           LLVM profile tag for host lane (default: autodetect host)
+  --skip-llvm-build          Reuse prebuilt bundled LLVM without rebuilding
   --sanitizer-build-dir <p>  Sanitizer lane build directory (default: <macos-build-dir>-asan)
   --sanitizer-build-type <t> Sanitizer lane build type (default: RelWithDebInfo)
   --include-docker           Also run deferred docker lane
@@ -31,6 +32,7 @@ RUN_DOCKER=0
 HOST_BUILD_DIR=""
 HOST_PROFILE=""
 BUILD_TYPE="Release"
+SKIP_LLVM_BUILD=0
 SANITIZER_BUILD_DIR=""
 SANITIZER_BUILD_TYPE="RelWithDebInfo"
 DOCKER_BUILD_DIR="build-linux-x86_64"
@@ -74,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profile=*)
       HOST_PROFILE="${1#*=}"
+      shift
+      ;;
+    --skip-llvm-build)
+      SKIP_LLVM_BUILD=1
       shift
       ;;
     --skip-sanitizer-lane)
@@ -168,9 +174,12 @@ else
   HOST_BUILD_DIR_ABS="${ROOT_DIR}/${HOST_BUILD_DIR}"
 fi
 
-"${ROOT_DIR}/scripts/build_bundled_llvm.sh" \
-  --profile "${HOST_PROFILE}" \
-  --build-type "${BUILD_TYPE}"
+if [[ "${SKIP_LLVM_BUILD}" -eq 0 ]]; then
+  "${ROOT_DIR}/scripts/build_bundled_llvm.sh" \
+    --profile "${HOST_PROFILE}" \
+    --build-type "${BUILD_TYPE}" \
+    --jobs 2
+fi
 
 "${ROOT_DIR}/scripts/run_macos_arm64_lane.sh" \
   --with-bundled-llvm \

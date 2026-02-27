@@ -19,6 +19,7 @@ usage: build_bundled_llvm.sh [options]
 Options:
   --profile <name>       Build profile tag (default: autodetect host, e.g. macos-arm64)
   --build-type <type>    CMake build type (default: Release)
+  --jobs <n>             Max parallel build jobs (default: 2)
   --print-profile        Print the detected host profile and exit
   -h, --help             Show this help message
 EOF
@@ -37,6 +38,7 @@ detect_profile() {
 
 PROFILE=""
 BUILD_TYPE="Release"
+JOBS=2
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,6 +66,18 @@ while [[ $# -gt 0 ]]; do
       BUILD_TYPE="${1#*=}"
       shift
       ;;
+    --jobs)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --jobs requires a value" >&2
+        exit 2
+      fi
+      JOBS="$2"
+      shift 2
+      ;;
+    --jobs=*)
+      JOBS="${1#*=}"
+      shift
+      ;;
     --print-profile)
       detect_profile
       exit 0
@@ -82,6 +96,11 @@ done
 
 if [[ -z "${PROFILE}" ]]; then
   PROFILE="$(detect_profile)"
+fi
+
+if ! [[ "${JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: --jobs must be a positive integer (got '${JOBS}')" >&2
+  exit 2
 fi
 
 LLVM_BUILD_DIR="${ROOT_DIR}/third_party/llvm/build-${PROFILE}"
@@ -111,6 +130,8 @@ cmake -S "${LLVM_SRC_DIR}" -B "${LLVM_BUILD_DIR}" \
   -G Ninja \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
+  -DLLVM_PARALLEL_COMPILE_JOBS="${JOBS}" \
+  -DLLVM_PARALLEL_LINK_JOBS=1 \
   -DLLVM_ENABLE_PROJECTS="" \
   -DLLVM_TARGETS_TO_BUILD="AArch64;X86" \
   -DLLVM_INCLUDE_TESTS=OFF \
@@ -123,9 +144,9 @@ cmake -S "${LLVM_SRC_DIR}" -B "${LLVM_BUILD_DIR}" \
   -DLLVM_BUILD_LLVM_DYLIB=OFF \
   -DLLVM_LINK_LLVM_DYLIB=OFF
 
-cmake --build "${LLVM_BUILD_DIR}" --parallel
+cmake --build "${LLVM_BUILD_DIR}" --parallel "${JOBS}"
 cmake --install "${LLVM_BUILD_DIR}"
 
 echo "LLVM build complete."
 echo "Profile: ${PROFILE}"
-echo "Use HOLYC_BUNDLED_LLVM_CONFIG_DIR=${LLVM_BUILD_DIR}/lib/cmake/llvm"
+echo "Use HOLYC_BUNDLED_LLVM_CONFIG_DIR=${INSTALL_DIR}/lib/cmake/llvm"

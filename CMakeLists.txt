@@ -48,6 +48,17 @@ set(
   CACHE PATH
   "Path to bundled LLVMConfig.cmake directory"
 )
+set(
+  HOLYC_BUNDLED_LLVM_BUILD_JOBS
+  "2"
+  CACHE STRING
+  "Max parallel jobs for bundled LLVM bootstrap build"
+)
+if(NOT HOLYC_BUNDLED_LLVM_BUILD_JOBS MATCHES "^[1-9][0-9]*$")
+  message(WARNING
+    "Invalid HOLYC_BUNDLED_LLVM_BUILD_JOBS='${HOLYC_BUNDLED_LLVM_BUILD_JOBS}', using 2")
+  set(HOLYC_BUNDLED_LLVM_BUILD_JOBS "2")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(HolycCompilerOptions)
@@ -82,6 +93,8 @@ if(NOT EXISTS "${_holyc_llvm_config}")
     -S "${HOLYC_BUNDLED_LLVM_SOURCE_DIR}"
     -B "${HOLYC_BUNDLED_LLVM_BUILD_DIR}"
     "-DCMAKE_BUILD_TYPE=${_holyc_llvm_build_type}"
+    "-DLLVM_PARALLEL_COMPILE_JOBS=${HOLYC_BUNDLED_LLVM_BUILD_JOBS}"
+    -DLLVM_PARALLEL_LINK_JOBS=1
     -DLLVM_ENABLE_PROJECTS=
     "-DLLVM_TARGETS_TO_BUILD=${_holyc_llvm_targets}"
     -DLLVM_INCLUDE_TESTS=OFF
@@ -124,7 +137,9 @@ if(NOT EXISTS "${_holyc_llvm_config}")
   endif()
 
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" --build "${HOLYC_BUNDLED_LLVM_BUILD_DIR}" --parallel
+    COMMAND
+      "${CMAKE_COMMAND}" --build "${HOLYC_BUNDLED_LLVM_BUILD_DIR}"
+      --parallel "${HOLYC_BUNDLED_LLVM_BUILD_JOBS}"
     RESULT_VARIABLE _holyc_llvm_build_result
   )
   if(NOT _holyc_llvm_build_result EQUAL 0)

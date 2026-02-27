@@ -6,27 +6,113 @@ on:
   pull_request:
 
 jobs:
-  build-and-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            label: linux-x86_64
-          - os: macos-14
-            label: macos-arm64
-
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.label }}
+  llvm-cache-linux:
+    runs-on: ubuntu-24.04
+    name: llvm-cache-linux
 
     steps:
-      - name: Checkout
+      - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      - name: Restore LLVM install cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/llvm/install-linux-x86_64
+          key: llvm-install-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/llvm/llvm/CMakeLists.txt', 'scripts/build_bundled_llvm.sh') }}
+
+      - name: Ensure bundled LLVM install
+        run: |
+          LLVM_CONFIG="third_party/llvm/install-linux-x86_64/lib/cmake/llvm/LLVMConfig.cmake"
+          if [[ ! -f "${LLVM_CONFIG}" ]]; then
+            scripts/build_bundled_llvm.sh --profile linux-x86_64 --jobs 2
+          fi
+          test -f "${LLVM_CONFIG}"
+
+      - name: Publish LLVM install artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-install-linux-x86_64
+          path: third_party/llvm/install-linux-x86_64
+          retention-days: 1
+
+  llvm-cache-macos:
+    runs-on: macos-14
+    name: llvm-cache-macos
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore LLVM install cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/llvm/install-darwin-arm64
+          key: llvm-install-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/llvm/llvm/CMakeLists.txt', 'scripts/build_bundled_llvm.sh') }}
+
+      - name: Ensure bundled LLVM install
+        run: |
+          LLVM_CONFIG="third_party/llvm/install-darwin-arm64/lib/cmake/llvm/LLVMConfig.cmake"
+          if [[ ! -f "${LLVM_CONFIG}" ]]; then
+            scripts/build_bundled_llvm.sh --profile darwin-arm64 --jobs 2
+          fi
+          test -f "${LLVM_CONFIG}"
+
+      - name: Publish LLVM install artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-install-darwin-arm64
+          path: third_party/llvm/install-darwin-arm64
+          retention-days: 1
+
+  build-and-test-linux:
+    runs-on: ubuntu-24.04
+    name: linux-x86_64
+    needs: llvm-cache-linux
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-install-linux-x86_64
+          path: third_party/llvm/install-linux-x86_64
+
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHOLYC_BUNDLED_LLVM_CONFIG_DIR="${{ github.workspace }}/third_party/llvm/install-linux-x86_64/lib/cmake/llvm"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --build-config Release
+
+  build-and-test-macos:
+    runs-on: macos-14
+    name: macos-arm64
+    needs: llvm-cache-macos
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-install-darwin-arm64
+          path: third_party/llvm/install-darwin-arm64
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHOLYC_BUNDLED_LLVM_CONFIG_DIR="${{ github.workspace }}/third_party/llvm/install-darwin-arm64/lib/cmake/llvm"
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -37,6 +123,7 @@ jobs:
   llvm-bundled-linux:
     runs-on: ubuntu-24.04
     name: llvm-bundled-linux
+    needs: llvm-cache-linux
 
     steps:
       - name: Checkout (with submodules)
@@ -44,21 +131,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Restore LLVM build cache
-        uses: actions/cache@v4
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            third_party/llvm/build-linux-x86_64
-            third_party/llvm/install-linux-x86_64
-            third_party/llvm/build
-            third_party/llvm/install
-          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
-
-      - name: Build bundled LLVM
-        run: scripts/build_bundled_llvm.sh
+          name: llvm-install-linux-x86_64
+          path: third_party/llvm/install-linux-x86_64
 
       - name: Configure with bundled LLVM
-        run: scripts/configure_with_bundled_llvm.sh
+        run: scripts/configure_with_bundled_llvm.sh --profile linux-x86_64 --llvm-cmake-dir "${{ github.workspace }}/third_party/llvm/install-linux-x86_64/lib/cmake/llvm"
 
       - name: Test with bundled LLVM
         run: ctest --test-dir build --output-on-failure --build-config Release
@@ -66,6 +146,7 @@ jobs:
   llvm-bundled-macos:
     runs-on: macos-14
     name: llvm-bundled-macos
+    needs: llvm-cache-macos
 
     steps:
       - name: Checkout (with submodules)
@@ -73,21 +154,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Restore LLVM build cache
-        uses: actions/cache@v4
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            third_party/llvm/build-macos-arm64
-            third_party/llvm/install-macos-arm64
-            third_party/llvm/build
-            third_party/llvm/install
-          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
-
-      - name: Build bundled LLVM
-        run: scripts/build_bundled_llvm.sh
+          name: llvm-install-darwin-arm64
+          path: third_party/llvm/install-darwin-arm64
 
       - name: Configure with bundled LLVM
-        run: scripts/configure_with_bundled_llvm.sh
+        run: scripts/configure_with_bundled_llvm.sh --profile darwin-arm64 --llvm-cmake-dir "${{ github.workspace }}/third_party/llvm/install-darwin-arm64/lib/cmake/llvm"
 
       - name: Test with bundled LLVM
         run: ctest --test-dir build --output-on-failure --build-config Release
@@ -95,6 +169,7 @@ jobs:
   sanitizers-macos-llvm:
     runs-on: macos-14
     name: sanitizers-macos-llvm
+    needs: llvm-cache-macos
 
     steps:
       - name: Checkout (with submodules)
@@ -102,25 +177,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Restore LLVM build cache
-        uses: actions/cache@v4
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            third_party/llvm/build-macos-arm64
-            third_party/llvm/install-macos-arm64
-            third_party/llvm/build
-            third_party/llvm/install
-          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
-
-      - name: Build bundled LLVM
-        run: scripts/build_bundled_llvm.sh
+          name: llvm-install-darwin-arm64
+          path: third_party/llvm/install-darwin-arm64
 
       - name: Sanitizer + hardening lane (bundled LLVM)
-        run: scripts/run_macos_arm64_llvm_sanitizer_lane.sh
+        env:
+          HOLYC_BUNDLED_LLVM_CONFIG_DIR: ${{ github.workspace }}/third_party/llvm/install-darwin-arm64/lib/cmake/llvm
+        run: scripts/run_macos_arm64_llvm_sanitizer_lane.sh --profile darwin-arm64
 
   release-gate-macos-arm64:
     runs-on: macos-14
     name: release-gate-macos-arm64
+    needs: llvm-cache-macos
 
     steps:
       - name: Checkout (with submodules)
@@ -128,22 +199,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Restore LLVM build cache
-        uses: actions/cache@v4
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            third_party/llvm/build-macos-arm64
-            third_party/llvm/install-macos-arm64
-            third_party/llvm/build
-            third_party/llvm/install
-          key: llvm-build-${{ runner.os }}-${{ hashFiles('.gitmodules', 'third_party/llvm/.git') }}
+          name: llvm-install-darwin-arm64
+          path: third_party/llvm/install-darwin-arm64
 
       - name: Full release gate (macOS ARM64)
-        run: scripts/run_full_gate.sh --profile macos-arm64 --macos-build-dir build-macos-arm64-llvm-lane --sanitizer-build-dir build-macos-arm64-llvm-asan
+        env:
+          HOLYC_BUNDLED_LLVM_CONFIG_DIR: ${{ github.workspace }}/third_party/llvm/install-darwin-arm64/lib/cmake/llvm
+        run: scripts/run_full_gate.sh --skip-llvm-build --profile darwin-arm64 --macos-build-dir build-macos-arm64-llvm-lane --sanitizer-build-dir build-macos-arm64-llvm-asan
 
   sanitizers-linux:
     runs-on: ubuntu-24.04
     name: sanitizers-linux
+    needs: llvm-cache-linux
 
     env:
       CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -156,8 +226,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-install-linux-x86_64
+          path: third_party/llvm/install-linux-x86_64
+
       - name: Configure
-        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        run: cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOLYC_BUNDLED_LLVM_CONFIG_DIR="${{ github.workspace }}/third_party/llvm/install-linux-x86_64/lib/cmake/llvm"
 
       - name: Build
         run: cmake --build build-asan --parallel
@@ -168,6 +244,7 @@ jobs:
   format-lint:
     runs-on: ubuntu-24.04
     name: format-lint
+    needs: llvm-cache-linux
 
     steps:
       - name: Checkout
@@ -175,7 +252,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Fetch LLVM install artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-install-linux-x86_64
+          path: third_party/llvm/install-linux-x86_64
+
       - name: Lint
+        env:
+          HOLYC_BUNDLED_LLVM_CONFIG_DIR: ${{ github.workspace }}/third_party/llvm/install-linux-x86_64/lib/cmake/llvm
         run: scripts/lint.sh
 
   static-analysis:

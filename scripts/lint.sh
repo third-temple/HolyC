@@ -6,7 +6,12 @@ cd "${ROOT_DIR}"
 
 ./scripts/format_check.sh
 
-cmake -S . -B build-lint -DCMAKE_BUILD_TYPE=Release
+cmake_args=(-DCMAKE_BUILD_TYPE=Release)
+if [[ -n "${HOLYC_BUNDLED_LLVM_CONFIG_DIR:-}" ]]; then
+  cmake_args+=("-DHOLYC_BUNDLED_LLVM_CONFIG_DIR=${HOLYC_BUNDLED_LLVM_CONFIG_DIR}")
+fi
+
+cmake -S . -B build-lint "${cmake_args[@]}"
 cmake --build build-lint --parallel
 ctest --test-dir build-lint --output-on-failure
 
