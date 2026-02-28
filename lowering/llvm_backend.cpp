@@ -7,6 +7,7 @@
 #include <memory>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -38,6 +39,7 @@ extern char** environ;
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
@@ -48,6 +50,7 @@ extern char** environ;
 #include <llvm/Support/Error.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Host.h>
 #endif
@@ -91,6 +94,63 @@ Result VerifyModule(const llvm::Module& module) {
     err_os.flush();
     return Result{false, err};
   }
+  return Result{true, ""};
+}
+
+llvm::OptimizationLevel ToLlvmOptLevel(OptLevel opt_level) {
+  switch (opt_level) {
+    case OptLevel::kO0:
+      return llvm::OptimizationLevel::O0;
+    case OptLevel::kO1:
+      return llvm::OptimizationLevel::O1;
+    case OptLevel::kO2:
+      return llvm::OptimizationLevel::O2;
+    case OptLevel::kO3:
+      return llvm::OptimizationLevel::O3;
+    case OptLevel::kOs:
+      return llvm::OptimizationLevel::Os;
+    case OptLevel::kOz:
+      return llvm::OptimizationLevel::Oz;
+  }
+  return llvm::OptimizationLevel::O2;
+}
+
+llvm::CodeGenOptLevel ToCodeGenOptLevel(OptLevel opt_level) {
+  switch (opt_level) {
+    case OptLevel::kO0:
+      return llvm::CodeGenOptLevel::None;
+    case OptLevel::kO1:
+      return llvm::CodeGenOptLevel::Less;
+    case OptLevel::kO2:
+      return llvm::CodeGenOptLevel::Default;
+    case OptLevel::kO3:
+      return llvm::CodeGenOptLevel::Aggressive;
+    case OptLevel::kOs:
+    case OptLevel::kOz:
+      return llvm::CodeGenOptLevel::Default;
+  }
+  return llvm::CodeGenOptLevel::Default;
+}
+
+Result OptimizeModule(llvm::Module& module, OptLevel opt_level) {
+  if (opt_level == OptLevel::kO0) {
+    return Result{true, ""};
+  }
+
+  llvm::LoopAnalysisManager lam;
+  llvm::FunctionAnalysisManager fam;
+  llvm::CGSCCAnalysisManager cgam;
+  llvm::ModuleAnalysisManager mam;
+  llvm::PassBuilder pb;
+
+  pb.registerModuleAnalyses(mam);
+  pb.registerCGSCCAnalyses(cgam);
+  pb.registerFunctionAnalyses(fam);
+  pb.registerLoopAnalyses(lam);
+  pb.crossRegisterProxies(lam, fam, cgam, mam);
+
+  llvm::ModulePassManager mpm = pb.buildPerModuleDefaultPipeline(ToLlvmOptLevel(opt_level));
+  mpm.run(module, mam);
   return Result{true, ""};
 }
 
@@ -544,7 +604,7 @@ Result NormalizeIr(std::string_view ir_text) {
 
 Result BuildExecutableFromIr(std::string_view ir_text, std::string_view output_path,
                              std::string_view artifact_dir,
-                             std::string_view target_triple) {
+                             std::string_view target_triple, OptLevel opt_level) {
 #ifdef HOLYC_LLVM_HEADERS_AVAILABLE
   EnsureLlvmInitialized();
 
@@ -572,11 +632,17 @@ Result BuildExecutableFromIr(std::string_view ir_text, std::string_view output_p
 
   llvm::TargetOptions options;
   std::unique_ptr<llvm::TargetMachine> tm(
-      target->createTargetMachine(triple, "", "", options, llvm::Reloc::PIC_));
+      target->createTargetMachine(triple, "", "", options, llvm::Reloc::PIC_, std::nullopt,
+                                  ToCodeGenOptLevel(opt_level)));
   if (!tm) {
     return Result{false, "failed to create LLVM target machine"};
   }
   module->setDataLayout(tm->createDataLayout());
+
+  const Result optimized = OptimizeModule(*module, opt_level);
+  if (!optimized.ok) {
+    return optimized;
+  }
 
   std::error_code ec_dir;
   const std::filesystem::path obj_dir = artifact_dir.empty()
@@ -626,11 +692,12 @@ Result BuildExecutableFromIr(std::string_view ir_text, std::string_view output_p
   (void)output_path;
   (void)artifact_dir;
   (void)target_triple;
+  (void)opt_level;
   return Result{false, "LLVM backend not enabled at build time"};
 #endif
 }
 
-Result LoadIrJit(std::string_view ir_text, std::string_view session_name) {
+Result LoadIrJit(std::string_view ir_text, std::string_view session_name, OptLevel opt_level) {
 #ifdef HOLYC_LLVM_HEADERS_AVAILABLE
   EnsureLlvmInitialized();
 
@@ -649,16 +716,23 @@ Result LoadIrJit(std::string_view ir_text, std::string_view session_name) {
     return parsed;
   }
 
+  module->setDataLayout(state->jit->getDataLayout());
+  const Result optimized = OptimizeModule(*module, opt_level);
+  if (!optimized.ok) {
+    return optimized;
+  }
+
   return AddModuleToJitSession(state, std::move(context), std::move(module));
 #else
   (void)ir_text;
   (void)session_name;
+  (void)opt_level;
   return Result{false, "LLVM backend not enabled at build time"};
 #endif
 }
 
 Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
-                    bool reset_after_run, std::string_view entry_symbol_name) {
+                    bool reset_after_run, std::string_view entry_symbol_name, OptLevel opt_level) {
 #ifdef HOLYC_LLVM_HEADERS_AVAILABLE
   EnsureLlvmInitialized();
 
@@ -682,6 +756,15 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
       sessions.erase(key);
     }
     return parsed;
+  }
+
+  module->setDataLayout(state->jit->getDataLayout());
+  const Result optimized = OptimizeModule(*module, opt_level);
+  if (!optimized.ok) {
+    if (reset_after_run) {
+      sessions.erase(key);
+    }
+    return optimized;
   }
 
   if (entry_symbol_name.empty()) {
@@ -743,6 +826,7 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
   (void)session_name;
   (void)reset_after_run;
   (void)entry_symbol_name;
+  (void)opt_level;
   return Result{false, "LLVM backend not enabled at build time"};
 #endif
 }

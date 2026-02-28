@@ -9,6 +9,7 @@
 
 #include <cerrno>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <sstream>
@@ -236,18 +237,44 @@ void DumpHirModule(const HIRModule& module, std::ostringstream& out) {
   }
 }
 
+template <typename Fn>
+auto RunTimedPhase(std::string_view phase_name, std::vector<PhaseTiming>* phase_timings, Fn&& fn)
+    -> decltype(fn()) {
+  const auto start = std::chrono::steady_clock::now();
+  auto result = fn();
+  const auto end = std::chrono::steady_clock::now();
+  if (phase_timings != nullptr) {
+    phase_timings->push_back(PhaseTiming{
+        std::string(phase_name),
+        std::chrono::duration<double>(end - start).count(),
+    });
+  }
+  return result;
+}
+
 }  // namespace
 
 ParseResult ParseAndDumpAst(std::string_view source, std::string_view filename,
-                            ExecutionMode mode, bool strict_mode) {
+                            ExecutionMode mode, bool strict_mode,
+                            std::vector<PhaseTiming>* phase_timings) {
   try {
-    const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
+    const std::string preprocessed = RunTimedPhase(
+        "preprocess", phase_timings,
+        [&]() { return internal::RunPreprocessor(source, filename, mode); });
 
-    const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    const TypedNode root = internal::AnalyzeSemantics(parsed, filename, strict_mode);
+    const internal::ParsedNode parsed =
+        RunTimedPhase("parse", phase_timings,
+                      [&]() { return internal::ParseAst(preprocessed, filename); });
+    const TypedNode root =
+        RunTimedPhase("sema", phase_timings, [&]() {
+          return internal::AnalyzeSemantics(parsed, filename, strict_mode);
+        });
 
     std::ostringstream out;
-    DumpNode(root, 0, out);
+    RunTimedPhase("ast-dump", phase_timings, [&]() {
+      DumpNode(root, 0, out);
+      return 0;
+    });
     return ParseResult{true, out.str()};
   } catch (const std::exception& ex) {
     return ParseResult{false, ex.what()};
@@ -255,20 +282,31 @@ ParseResult ParseAndDumpAst(std::string_view source, std::string_view filename,
 }
 
 ParseResult PreprocessSource(std::string_view source, std::string_view filename,
-                             ExecutionMode mode, bool /*strict_mode*/) {
+                             ExecutionMode mode, bool /*strict_mode*/,
+                             std::vector<PhaseTiming>* phase_timings) {
   try {
-    return ParseResult{true, internal::RunPreprocessor(source, filename, mode)};
+    const std::string preprocessed = RunTimedPhase(
+        "preprocess", phase_timings,
+        [&]() { return internal::RunPreprocessor(source, filename, mode); });
+    return ParseResult{true, preprocessed};
   } catch (const std::exception& ex) {
     return ParseResult{false, ex.what()};
   }
 }
 
 ParseResult CheckSource(std::string_view source, std::string_view filename,
-                        ExecutionMode mode, bool strict_mode) {
+                        ExecutionMode mode, bool strict_mode,
+                        std::vector<PhaseTiming>* phase_timings) {
   try {
-    const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
-    const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    (void)internal::AnalyzeSemantics(parsed, filename, strict_mode);
+    const std::string preprocessed = RunTimedPhase(
+        "preprocess", phase_timings,
+        [&]() { return internal::RunPreprocessor(source, filename, mode); });
+    const internal::ParsedNode parsed =
+        RunTimedPhase("parse", phase_timings,
+                      [&]() { return internal::ParseAst(preprocessed, filename); });
+    (void)RunTimedPhase("sema", phase_timings, [&]() {
+      return internal::AnalyzeSemantics(parsed, filename, strict_mode);
+    });
     return ParseResult{true, "ok\n"};
   } catch (const std::exception& ex) {
     return ParseResult{false, ex.what()};
@@ -276,15 +314,27 @@ ParseResult CheckSource(std::string_view source, std::string_view filename,
 }
 
 ParseResult EmitHir(std::string_view source, std::string_view filename, ExecutionMode mode,
-                    bool strict_mode) {
+                    bool strict_mode, std::vector<PhaseTiming>* phase_timings) {
   try {
-    const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
-    const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    const TypedNode root = internal::AnalyzeSemantics(parsed, filename, strict_mode);
-    const HIRModule module = internal::LowerToHir(root, filename);
+    const std::string preprocessed = RunTimedPhase(
+        "preprocess", phase_timings,
+        [&]() { return internal::RunPreprocessor(source, filename, mode); });
+    const internal::ParsedNode parsed =
+        RunTimedPhase("parse", phase_timings,
+                      [&]() { return internal::ParseAst(preprocessed, filename); });
+    const TypedNode root =
+        RunTimedPhase("sema", phase_timings, [&]() {
+          return internal::AnalyzeSemantics(parsed, filename, strict_mode);
+        });
+    const HIRModule module =
+        RunTimedPhase("hir-lower", phase_timings,
+                      [&]() { return internal::LowerToHir(root, filename); });
 
     std::ostringstream out;
-    DumpHirModule(module, out);
+    RunTimedPhase("hir-dump", phase_timings, [&]() {
+      DumpHirModule(module, out);
+      return 0;
+    });
     return ParseResult{true, out.str()};
   } catch (const std::exception& ex) {
     return ParseResult{false, ex.what()};
@@ -292,17 +342,28 @@ ParseResult EmitHir(std::string_view source, std::string_view filename, Executio
 }
 
 ParseResult EmitLlvmIr(std::string_view source, std::string_view filename,
-                       ExecutionMode mode, bool strict_mode) {
+                       ExecutionMode mode, bool strict_mode,
+                       std::vector<PhaseTiming>* phase_timings) {
   try {
-    const std::string preprocessed = internal::RunPreprocessor(source, filename, mode);
+    const std::string preprocessed = RunTimedPhase(
+        "preprocess", phase_timings,
+        [&]() { return internal::RunPreprocessor(source, filename, mode); });
 
-    const internal::ParsedNode parsed = internal::ParseAst(preprocessed, filename);
-    const TypedNode root = internal::AnalyzeSemantics(parsed, filename, strict_mode);
+    const internal::ParsedNode parsed =
+        RunTimedPhase("parse", phase_timings,
+                      [&]() { return internal::ParseAst(preprocessed, filename); });
+    const TypedNode root =
+        RunTimedPhase("sema", phase_timings, [&]() {
+          return internal::AnalyzeSemantics(parsed, filename, strict_mode);
+        });
 
-    const HIRModule module = internal::LowerToHir(root, filename);
+    const HIRModule module =
+        RunTimedPhase("hir-lower", phase_timings,
+                      [&]() { return internal::LowerToHir(root, filename); });
 
-    const llvm_backend::Result irbuilder =
-        llvm_irbuilder_backend::EmitIrFromHir(module, "holyc");
+    const llvm_backend::Result irbuilder = RunTimedPhase(
+        "llvm-emit", phase_timings,
+        [&]() { return llvm_irbuilder_backend::EmitIrFromHir(module, "holyc"); });
     if (irbuilder.ok) {
       return ParseResult{true, irbuilder.output};
     }
