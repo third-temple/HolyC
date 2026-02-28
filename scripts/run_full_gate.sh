@@ -196,7 +196,7 @@ fi
 ctest --test-dir "${HOST_BUILD_DIR_ABS}" \
   --output-on-failure \
   --build-config "${BUILD_TYPE}" \
-  -R "holyc\\.corpus\\.holyc-docs\\.curated|runtime\\.jit_backend\\.conformance|holyc\\.emit-llvm\\.invalid-comma-expr-lowering|holyc\\.emit-llvm\\.invalid-expression-space-lowering|holyc\\.emit-llvm\\.invalid-string-literal|holyc\\.jit\\.invalid-comma-expr-lowering|holyc\\.jit\\.expression-space-lowering"
+  -R "holyc\\.corpus\\.holyc-docs\\.full-repo|runtime\\.jit_backend\\.conformance|holyc\\.emit-llvm\\.invalid-comma-expr-lowering|holyc\\.emit-llvm\\.invalid-expression-space-lowering|holyc\\.emit-llvm\\.invalid-string-literal|holyc\\.jit\\.invalid-comma-expr-lowering|holyc\\.jit\\.expression-space-lowering"
 
 if rg -n "not-yet" "${ROOT_DIR}/CMakeLists.txt" >/dev/null 2>&1; then
   echo "error: release gate forbids lingering 'not-yet' tests in CMakeLists.txt" >&2

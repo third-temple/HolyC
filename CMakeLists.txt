@@ -1794,8 +1794,8 @@ if(BUILD_TESTING)
   )
 
   add_test(
-    NAME holyc.corpus.holyc-docs.curated
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/run_holyc_docs_curated.sh"
+    NAME holyc.corpus.holyc-docs.full-repo
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus/run_holyc_docs_corpus.sh"
             $<TARGET_FILE:holyc>
   )
 endif()
