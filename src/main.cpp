@@ -23,6 +23,7 @@ extern char** environ;
 
 #include "frontend.h"
 #include "llvm_backend.h"
+#include "repl.h"
 #include "version.h"
 
 namespace {
@@ -50,6 +51,8 @@ void print_usage() {
             << "  jit <file> [--strict|--permissive] [--jit-backend=llvm]\n"
             << "            [--jit-session=<name>] [--jit-reset]\n"
             << "                       Execute supported subset in-process\n"
+            << "  repl [--strict|--permissive] [--jit-session=<name>] [--jit-reset]\n"
+            << "                       Start interactive JIT-backed HolyC REPL\n"
             << "  build <file> [-o out] [--target=<triple>] [--artifact-dir=<dir>]\n"
             << "               [--keep-temps] [--strict|--permissive]\n"
             << "                       Build executable via host toolchain/LLVM\n"
@@ -621,6 +624,28 @@ int main(int argc, char** argv) {
     }
     std::cout << result.output;
     return 0;
+  }
+
+  if (arg1 == "repl") {
+    bool strict_mode = kStrictModeDefault;
+    std::string jit_session = "__repl__";
+    bool jit_reset = false;
+    for (int i = 2; i < argc; ++i) {
+      const std::string_view arg = argv[i];
+      if (TryParseStrictArg(arg, &strict_mode)) {
+        continue;
+      }
+      if (TryParseJitSessionArg(arg, &jit_session)) {
+        continue;
+      }
+      if (arg == "--jit-reset") {
+        jit_reset = true;
+        continue;
+      }
+      std::cerr << "error: unknown repl argument: " << arg << "\n";
+      return 2;
+    }
+    return holyc::repl::RunRepl(strict_mode, jit_session, jit_reset);
   }
 
   if (arg1 == "build") {
