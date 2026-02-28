@@ -1,43 +1,89 @@
 # HolyC
 
-Cross-platform HolyC compiler. Faithfully implements all HolyC language features, except for TempleOS-specific semantics.
+HolyC compiler with an LLVM backend.
 
-## Build
+## Quick Start
 
 ```bash
+git clone --recursive https://github.com/third-temple/HolyC
+cd HolyC
+
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
 ```
 
-## Quality And Perf
+This outputs the `holyc` compiler binary to the `build/` directory.
+
+## Usage
 
 ```bash
-./scripts/lint.sh
-./scripts/static_analysis.sh
-./scripts/perf_baseline.sh ./build/holyc --suite all --opt-level 2 --runs 7 --warmup 2
-./scripts/perf_opt_sweep.sh ./build/holyc --suite all --runs 3 --warmup 1
-```
-
-Perf reports are written to `.holyc-artifacts/perf-baseline.md` and `.holyc-artifacts/perf-baseline.json` by default.
-
-## Some commands
-
-```bash
-./build/holyc preprocess tests/samples/preprocess.HC
-./build/holyc ast-dump tests/samples/features.HC
-./build/holyc ast-dump tests/samples/semantics.HC
-./build/holyc ast-dump tests/samples/preprocess.HC
-./build/holyc emit-llvm tests/samples/llvm.HC
-./build/holyc emit-llvm tests/samples/llvm.HC --time-phases --time-phases-json=.holyc-artifacts/emit-llvm-phases.json
-./build/holyc build tests/samples/llvm.HC -o ./build/llvm_app
-./build/holyc build tests/samples/llvm.HC -o ./build/llvm_app --opt-level=3
+./build/holyc --help
+./build/holyc check tests/samples/features.HC
 ./build/holyc jit tests/samples/jit.HC
-./build/holyc jit tests/samples/jit.HC --opt-level=2
-./build/holyc jit tests/samples/runtime_try.HC
-./build/holyc jit tests/samples/switch_compat.HC
+./build/holyc build tests/samples/llvm.HC -o ./build/llvm_app
+./build/holyc run tests/samples/runtime_print.HC
+./build/holyc repl
 ```
 
-## TODO
-- [ ] Test on platforms aside from macOS ARM64
-- [x] REPL
+## Tutorial
+
+### 1) Your first program
+
+```hc
+I64 Main()
+{
+  "Hello, World!\n";
+  return 0;
+}
+```
+
+Run it with JIT:
+
+```bash
+./build/holyc jit examples/hello.HC
+```
+
+Or build a native executable:
+
+```bash
+./build/holyc build examples/hello.HC -o ./build/hello
+./build/hello
+```
+
+### 2) Try the REPL
+
+```bash
+./build/holyc repl
+```
+
+Inside REPL:
+
+```hc
+I64 X() { return 42; }
+"X=%d\n", X();
+```
+
+### 3) Useful example programs
+
+- `examples/hello.HC`
+- `examples/fizzbuzz.HC`
+- `examples/language/` (organized by language area)
+
+## HolyC vs C
+
+- Entry point is `Main`, not `main`.
+- Common type names are HolyC-style aliases like `I64`, `U64`, `F64`, and `U0` (void-like).
+- Printing uses HolyC print statements:
+  - `"Hello\n";`
+  - `"%d\n", value;`
+- Default function arguments are supported.
+- JIT execution is a first-class workflow (`holyc jit ...`, `holyc repl`).
+
+## Notes
+
+- TempleOS-specific OS/runtime APIs are out of scope.
+- LLVM is required and built from the bundled `third_party/llvm` source tree.
+
+## License
+
+AGPL-3.0. See [LICENSE](LICENSE).
