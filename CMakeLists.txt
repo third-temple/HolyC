@@ -402,6 +402,12 @@ if(BUILD_TESTING)
   set_tests_properties(holyc.check.main-with-params PROPERTIES PASS_REGULAR_EXPRESSION "ok")
 
   add_test(
+    NAME holyc.check.main-with-extra-params
+    COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/main_with_extra_params.HC"
+  )
+  set_tests_properties(holyc.check.main-with-extra-params PROPERTIES PASS_REGULAR_EXPRESSION "ok")
+
+  add_test(
     NAME holyc.check.print-star-width-precision
     COMMAND $<TARGET_FILE:holyc> check "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/print_star_width_precision.HC"
   )
@@ -1498,6 +1504,12 @@ if(BUILD_TESTING)
       COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/main_with_params.HC" --jit-backend=llvm
     )
     set_tests_properties(holyc.jit.llvm.main-with-params PROPERTIES PASS_REGULAR_EXPRESSION "0")
+
+    add_test(
+      NAME holyc.jit.llvm.main-with-extra-params
+      COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/main_with_extra_params.HC" --jit-backend=llvm
+    )
+    set_tests_properties(holyc.jit.llvm.main-with-extra-params PROPERTIES PASS_REGULAR_EXPRESSION "0")
 
     add_test(
       NAME holyc.jit.llvm.print-star-width-precision
