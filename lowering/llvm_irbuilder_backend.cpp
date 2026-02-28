@@ -2456,22 +2456,21 @@ class IrBuilderEmitter {
                     llvm::ConstantInt::get(TypeI64(), reflection_table_count_)});
     }
 
-    if (holy_main->arg_size() > 2) {
-      return {false, "irbuilder emit: Main() supports at most two host parameters"};
-    }
-
     std::vector<llvm::Value*> holy_args;
     holy_args.reserve(holy_main->arg_size());
     for (unsigned i = 0; i < holy_main->arg_size(); ++i) {
       llvm::Type* param_ty = holy_main->getFunctionType()->getParamType(i);
       llvm::Value* source = nullptr;
+      if (i >= 2) {
+        holy_args.push_back(llvm::Constant::getNullValue(param_ty));
+        continue;
+      }
       if (holy_main->arg_size() == 1) {
         source = param_ty->isPointerTy() ? static_cast<llvm::Value*>(argv_arg)
                                          : static_cast<llvm::Value*>(argc_arg);
-      } else if (i == 0) {
-        source = argc_arg;
       } else {
-        source = argv_arg;
+        source = param_ty->isPointerTy() ? static_cast<llvm::Value*>(argv_arg)
+                                         : static_cast<llvm::Value*>(argc_arg);
       }
       llvm::Value* casted = cast_for_main(source, param_ty);
       if (casted == nullptr) {

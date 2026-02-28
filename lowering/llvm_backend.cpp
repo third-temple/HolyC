@@ -35,6 +35,7 @@ extern char** environ;
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/Mangling.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -91,6 +92,125 @@ Result VerifyModule(const llvm::Module& module) {
     return Result{false, err};
   }
   return Result{true, ""};
+}
+
+llvm::Value* CastJitEntryValue(llvm::IRBuilder<>& builder, llvm::Value* value,
+                               llvm::Type* target_type) {
+  if (value == nullptr || target_type == nullptr) {
+    return nullptr;
+  }
+  if (value->getType() == target_type) {
+    return value;
+  }
+  if (value->getType()->isIntegerTy() && target_type->isIntegerTy()) {
+    const unsigned from_bits = value->getType()->getIntegerBitWidth();
+    const unsigned to_bits = target_type->getIntegerBitWidth();
+    if (from_bits == to_bits) {
+      return value;
+    }
+    if (from_bits < to_bits) {
+      return builder.CreateSExt(value, target_type);
+    }
+    return builder.CreateTrunc(value, target_type);
+  }
+  if (value->getType()->isPointerTy() && target_type->isPointerTy()) {
+    return builder.CreateBitCast(value, target_type);
+  }
+  if (value->getType()->isPointerTy() && target_type->isIntegerTy()) {
+    return builder.CreatePtrToInt(value, target_type);
+  }
+  if (value->getType()->isIntegerTy() && target_type->isPointerTy()) {
+    return builder.CreateIntToPtr(value, target_type);
+  }
+  return nullptr;
+}
+
+Result BuildJitEntrypointWrapper(llvm::Module& module, llvm::Function* target_fn,
+                                 std::string_view entry_symbol) {
+  if (target_fn == nullptr) {
+    return Result{false, "jit: missing entry target"};
+  }
+
+  llvm::LLVMContext& context = module.getContext();
+  llvm::Type* i32_ty = llvm::Type::getInt32Ty(context);
+  llvm::Type* i64_ty = llvm::Type::getInt64Ty(context);
+  llvm::Type* ptr_ty = llvm::PointerType::get(context, 0);
+
+  llvm::FunctionType* entry_ty = llvm::FunctionType::get(i32_ty, {}, false);
+  llvm::Function* entry_fn = llvm::Function::Create(
+      entry_ty, llvm::Function::ExternalLinkage, std::string(entry_symbol), module);
+  llvm::BasicBlock* entry_bb = llvm::BasicBlock::Create(context, "entry", entry_fn);
+  llvm::IRBuilder<> builder(entry_bb);
+
+  llvm::Value* argc_value = llvm::ConstantInt::get(i32_ty, 1);
+  llvm::GlobalVariable* argv0_global =
+      builder.CreateGlobalString("holyc-jit", "__holyc_jit_argv0");
+  llvm::Value* argv0_value = builder.CreateInBoundsGEP(
+      argv0_global->getValueType(), argv0_global,
+      {llvm::ConstantInt::get(i64_ty, 0), llvm::ConstantInt::get(i64_ty, 0)});
+  llvm::ArrayType* argv_array_ty = llvm::ArrayType::get(ptr_ty, 2);
+  llvm::Value* argv_storage = builder.CreateAlloca(argv_array_ty, nullptr, "argv_storage");
+  llvm::Value* argv_slot0 = builder.CreateInBoundsGEP(
+      argv_array_ty, argv_storage,
+      {llvm::ConstantInt::get(i64_ty, 0), llvm::ConstantInt::get(i64_ty, 0)});
+  builder.CreateStore(argv0_value, argv_slot0);
+  llvm::Value* argv_slot1 = builder.CreateInBoundsGEP(
+      argv_array_ty, argv_storage,
+      {llvm::ConstantInt::get(i64_ty, 0), llvm::ConstantInt::get(i64_ty, 1)});
+  builder.CreateStore(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptr_ty)),
+                      argv_slot1);
+  llvm::Value* argv_value = builder.CreateInBoundsGEP(
+      argv_array_ty, argv_storage,
+      {llvm::ConstantInt::get(i64_ty, 0), llvm::ConstantInt::get(i64_ty, 0)});
+
+  std::vector<llvm::Value*> call_args;
+  call_args.reserve(target_fn->arg_size());
+  for (unsigned i = 0; i < target_fn->arg_size(); ++i) {
+    llvm::Type* param_ty = target_fn->getFunctionType()->getParamType(i);
+    llvm::Value* arg_value = nullptr;
+    if (i < 2) {
+      llvm::Value* source =
+          param_ty->isPointerTy() ? argv_value : static_cast<llvm::Value*>(argc_value);
+      arg_value = CastJitEntryValue(builder, source, param_ty);
+    }
+    if (arg_value == nullptr) {
+      if (!param_ty->isFirstClassType()) {
+        return Result{false, "jit: entry parameter type is not host-call compatible"};
+      }
+      arg_value = llvm::Constant::getNullValue(param_ty);
+    }
+    call_args.push_back(arg_value);
+  }
+
+  llvm::Value* target_result = nullptr;
+  if (target_fn->getReturnType()->isVoidTy()) {
+    builder.CreateCall(target_fn, call_args);
+    builder.CreateRet(llvm::ConstantInt::get(i32_ty, 0));
+    return Result{true, ""};
+  }
+
+  target_result = builder.CreateCall(target_fn, call_args);
+  if (target_result->getType()->isIntegerTy()) {
+    if (target_result->getType()->getIntegerBitWidth() > i32_ty->getIntegerBitWidth()) {
+      target_result = builder.CreateTrunc(target_result, i32_ty);
+    } else if (target_result->getType()->getIntegerBitWidth() <
+               i32_ty->getIntegerBitWidth()) {
+      target_result = builder.CreateSExt(target_result, i32_ty);
+    }
+    builder.CreateRet(target_result);
+    return Result{true, ""};
+  }
+  if (target_result->getType()->isPointerTy()) {
+    llvm::Value* as_i64 = builder.CreatePtrToInt(target_result, i64_ty);
+    builder.CreateRet(builder.CreateTrunc(as_i64, i32_ty));
+    return Result{true, ""};
+  }
+  if (target_result->getType()->isFloatingPointTy()) {
+    builder.CreateRet(builder.CreateFPToSI(target_result, i32_ty));
+    return Result{true, ""};
+  }
+
+  return Result{false, "jit: entry return type is not host-call compatible"};
 }
 
 #if !defined(__unix__) && !defined(__APPLE__)
@@ -495,9 +615,17 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     }
     return Result{false, "jit: missing Main() function"};
   }
-  const std::size_t entry_arg_count = entry_fn->arg_size();
   const std::string entry_symbol = "__holyc_entry_" + std::to_string(++state.next_entry_id);
-  entry_fn->setName(entry_symbol);
+  const std::string entry_target_symbol =
+      "__holyc_entry_target_" + std::to_string(state.next_entry_id);
+  entry_fn->setName(entry_target_symbol);
+  Result wrapper_result = BuildJitEntrypointWrapper(*module, entry_fn, entry_symbol);
+  if (!wrapper_result.ok) {
+    if (reset_after_run) {
+      sessions.erase(key);
+    }
+    return wrapper_result;
+  }
 
   const std::string module_dylib_name =
       "__holyc_module_" + std::to_string(++state.next_module_id);
@@ -528,24 +656,9 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     return Result{false, llvm::toString(sym.takeError())};
   }
 
-  int rc = 0;
-  if (entry_arg_count == 0) {
-    using MainFn = int (*)();
-    MainFn main_fn = sym->toPtr<MainFn>();
-    rc = main_fn();
-  } else if (entry_arg_count == 2) {
-    using MainFn = int (*)(int, char**);
-    MainFn main_fn = sym->toPtr<MainFn>();
-    const char* argv0 = "holyc-jit";
-    char* argv_local[2] = {const_cast<char*>(argv0), nullptr};
-    rc = main_fn(1, argv_local);
-  } else {
-    if (reset_after_run) {
-      sessions.erase(key);
-    }
-    return Result{false, "jit: host entrypoint has unsupported signature (arg_count=" +
-                             std::to_string(entry_arg_count) + ")"};
-  }
+  using MainFn = int (*)();
+  MainFn main_fn = sym->toPtr<MainFn>();
+  const int rc = main_fn();
   // Spawn() launches detached tasks; wait for completion before unloading JIT state.
   hc_spawn_wait_all();
   if (reset_after_run) {
