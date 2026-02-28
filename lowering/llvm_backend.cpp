@@ -546,6 +546,8 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     return Result{false, "jit: host entrypoint has unsupported signature (arg_count=" +
                              std::to_string(entry_arg_count) + ")"};
   }
+  // Spawn() launches detached tasks; wait for completion before unloading JIT state.
+  hc_spawn_wait_all();
   if (reset_after_run) {
     sessions.erase(key);
   }
@@ -560,6 +562,7 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
 
 Result ResetJitSession(std::string_view session_name) {
 #ifdef HOLYC_LLVM_HEADERS_AVAILABLE
+  hc_spawn_wait_all();
   JitSessions().erase(SessionKey(session_name));
   return Result{true, ""};
 #else

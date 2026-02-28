@@ -58,6 +58,7 @@ CHashClass* HashFind(const char* name, const char* table, std::int64_t kind);
 std::int64_t MemberMetaData(const char* key, const CMemberLst* member);
 std::int64_t MemberMetaFind(const char* key, const CMemberLst* member);
 std::int64_t hc_task_spawn(const char* task_name);
+void hc_spawn_wait_all();
 
 }
 

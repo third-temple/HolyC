@@ -60,6 +60,26 @@ thread_local std::size_t g_reflection_field_count = 0;
 thread_local CHashClass* g_hash_classes = nullptr;
 thread_local bool g_reflection_cache_ready = false;
 std::atomic<std::int64_t> g_next_task_id{1};
+pthread_mutex_t g_spawn_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t g_spawn_cond = PTHREAD_COND_INITIALIZER;
+std::int64_t g_spawn_inflight = 0;
+
+void MarkSpawnStart() {
+  pthread_mutex_lock(&g_spawn_mutex);
+  ++g_spawn_inflight;
+  pthread_mutex_unlock(&g_spawn_mutex);
+}
+
+void MarkSpawnDone() {
+  pthread_mutex_lock(&g_spawn_mutex);
+  if (g_spawn_inflight > 0) {
+    --g_spawn_inflight;
+  }
+  if (g_spawn_inflight == 0) {
+    pthread_cond_broadcast(&g_spawn_cond);
+  }
+  pthread_mutex_unlock(&g_spawn_mutex);
+}
 
 const char* LookupZString(const char* table, std::int64_t index) {
   if (table == nullptr || index < 0) {
@@ -519,6 +539,7 @@ void* JobThreadMain(void* opaque) {
 void* SpawnThreadMain(void* opaque) {
   HcSpawnRequest* req = static_cast<HcSpawnRequest*>(opaque);
   if (req == nullptr) {
+    MarkSpawnDone();
     return nullptr;
   }
   if (req->fn != nullptr) {
@@ -527,6 +548,7 @@ void* SpawnThreadMain(void* opaque) {
     fn(req->data);
   }
   std::free(req);
+  MarkSpawnDone();
   return nullptr;
 }
 
@@ -931,6 +953,7 @@ CTask* Spawn(const char* fn, const char* data, const char* task_name, std::int64
     attr_ptr = &attr;
   }
 
+  MarkSpawnStart();
   pthread_t thread{};
   const int rc = pthread_create(&thread, attr_ptr, SpawnThreadMain, req);
   if (attr_initialized) {
@@ -938,6 +961,7 @@ CTask* Spawn(const char* fn, const char* data, const char* task_name, std::int64
   }
   if (rc != 0) {
     std::free(req);
+    MarkSpawnDone();
     return nullptr;
   }
   pthread_detach(thread);
@@ -1028,6 +1052,14 @@ std::int64_t hc_task_spawn(const char* task_name) {
     return -1;
   }
   return static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(task));
+}
+
+void hc_spawn_wait_all() {
+  pthread_mutex_lock(&g_spawn_mutex);
+  while (g_spawn_inflight > 0) {
+    pthread_cond_wait(&g_spawn_cond, &g_spawn_mutex);
+  }
+  pthread_mutex_unlock(&g_spawn_mutex);
 }
 
 }  // extern "C"
