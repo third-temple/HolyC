@@ -898,8 +898,8 @@ struct DeclCatalog {
 
 class ReplEngine {
  public:
-  ReplEngine(bool strict_mode, std::string_view jit_session)
-      : strict_mode_(strict_mode), jit_session_(jit_session) {}
+  ReplEngine(bool strict_mode, std::string_view jit_session, llvm_backend::OptLevel opt_level)
+      : strict_mode_(strict_mode), jit_session_(jit_session), opt_level_(opt_level) {}
 
   void SetStrictMode(bool strict_mode) { strict_mode_ = strict_mode; }
 
@@ -977,7 +977,8 @@ class ReplEngine {
         return false;
       }
 
-      const llvm_backend::Result load_result = llvm_backend::LoadIrJit(ir_result.output, jit_session_);
+      const llvm_backend::Result load_result =
+          llvm_backend::LoadIrJit(ir_result.output, jit_session_, opt_level_);
       if (!load_result.ok) {
         std::cerr << load_result.output << "\n";
         return false;
@@ -1030,7 +1031,7 @@ class ReplEngine {
     }
 
     const llvm_backend::Result jit_result = llvm_backend::ExecuteIrJit(
-        ir_result.output, jit_session_, false, entry_function_name);
+        ir_result.output, jit_session_, false, entry_function_name, opt_level_);
     if (!jit_result.ok) {
       std::cerr << jit_result.output << "\n";
       return false;
@@ -1091,14 +1092,16 @@ class ReplEngine {
 
   bool strict_mode_ = true;
   std::string jit_session_;
+  llvm_backend::OptLevel opt_level_ = llvm_backend::OptLevel::kO1;
   std::uint64_t cell_id_ = 0;
   DeclCatalog catalog_;
 };
 
 }  // namespace
 
-int RunRepl(bool strict_mode, std::string_view jit_session, bool jit_reset) {
-  ReplEngine engine(strict_mode, jit_session.empty() ? "__repl__" : jit_session);
+int RunRepl(bool strict_mode, std::string_view jit_session, bool jit_reset,
+            llvm_backend::OptLevel opt_level) {
+  ReplEngine engine(strict_mode, jit_session.empty() ? "__repl__" : jit_session, opt_level);
   if (jit_reset && !engine.Reset()) {
     return 1;
   }
