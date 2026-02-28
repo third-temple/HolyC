@@ -1138,6 +1138,12 @@ if(BUILD_TESTING)
   )
 
   add_test(
+    NAME holyc.preprocess.exe-extended
+    COMMAND $<TARGET_FILE:holyc> preprocess "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/preprocess_exe_extended.HC"
+  )
+  set_tests_properties(holyc.preprocess.exe-extended PROPERTIES PASS_REGULAR_EXPRESSION "GeneratedByExe")
+
+  add_test(
     NAME holyc.preprocess.invalid-exe
     COMMAND $<TARGET_FILE:holyc> preprocess "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/invalid_unsupported_exe.HC"
   )
@@ -1578,6 +1584,12 @@ if(BUILD_TESTING)
     COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/preprocess_modes.HC"
   )
   set_tests_properties(holyc.jit.preprocess-modes PROPERTIES PASS_REGULAR_EXPRESSION "10")
+
+  add_test(
+    NAME holyc.jit.preprocess-exe-extended
+    COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/preprocess_exe_extended.HC"
+  )
+  set_tests_properties(holyc.jit.preprocess-exe-extended PROPERTIES PASS_REGULAR_EXPRESSION "11")
 
   add_test(
     NAME holyc.preprocess.preprocess-modes-jit

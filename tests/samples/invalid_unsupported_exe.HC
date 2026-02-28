@@ -1,1 +1,1 @@
-#exe { Cd("/tmp"); }
+#exe { UnknownExeBuiltin("/tmp"); }

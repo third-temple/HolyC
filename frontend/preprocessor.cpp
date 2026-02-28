@@ -126,7 +126,20 @@ class Preprocessor {
       const std::string trimmed = LTrim(line);
 
       if (StartsWith(trimmed, "#")) {
-        HandleDirective(trimmed, file, line_no, depth, include_stack, &cond, &out);
+        std::string directive = trimmed;
+        const int directive_line_no = line_no;
+        if (IsExeDirectiveLine(trimmed)) {
+          while (!HasClosedExeBody(directive)) {
+            std::string continued;
+            if (!std::getline(input, continued)) {
+              Fail("HC1018", file, directive_line_no, "unterminated #exe block");
+            }
+            ++line_no;
+            directive.push_back('\n');
+            directive += continued;
+          }
+        }
+        HandleDirective(directive, file, directive_line_no, depth, include_stack, &cond, &out);
         continue;
       }
 
@@ -271,7 +284,7 @@ class Preprocessor {
 
     if (directive == "exe") {
       std::string rest;
-      std::getline(iss, rest);
+      std::getline(iss, rest, '\0');
       const std::string body = Trim(rest);
       *out << EvaluateExe(body, file, line_no);
       return;
@@ -982,40 +995,307 @@ class Preprocessor {
     return out.str();
   }
 
-  static std::string EvaluateExe(const std::string& expr, const std::string& file,
-                                 int line_no) {
-    const std::string trimmed = Trim(expr);
-    if (!(StartsWith(trimmed, "{") && trimmed.back() == '}')) {
-      Fail("HC1018", file, line_no, "#exe currently requires single-line braced body");
-    }
+  std::string EvaluateExe(const std::string& expr, const std::string& file, int line_no) const {
+    const std::string source = Trim(expr);
+    std::size_t pos = 0;
+    std::ostringstream output;
 
-    const std::string body = Trim(trimmed.substr(1, trimmed.size() - 2));
-    if (!StartsWith(body, "StreamPrint(")) {
-      Fail("HC1019", file, line_no, "#exe only supports StreamPrint(...) in M3");
-    }
+    auto skip_ws = [&]() {
+      while (pos < source.size() && std::isspace(static_cast<unsigned char>(source[pos])) != 0) {
+        ++pos;
+      }
+    };
 
-    const std::size_t open = body.find('(');
-    const std::size_t close = body.rfind(')');
-    if (open == std::string::npos || close == std::string::npos || close <= open) {
-      Fail("HC1020", file, line_no, "malformed StreamPrint call");
-    }
+    auto at_end = [&]() { return pos >= source.size(); };
 
-    std::string args = Trim(body.substr(open + 1, close - open - 1));
-    if (body.substr(close + 1) != ";") {
-      Fail("HC1024", file, line_no,
-           "#exe StreamPrint call must end with ';' and contain no trailing tokens");
-    }
+    auto parse_identifier = [&]() -> std::string {
+      skip_ws();
+      if (at_end() || !IsIdentStart(source[pos])) {
+        Fail("HC1020", file, line_no, "expected identifier in #exe block");
+      }
+      const std::size_t begin = pos++;
+      while (pos < source.size() && IsIdentContinue(source[pos])) {
+        ++pos;
+      }
+      return source.substr(begin, pos - begin);
+    };
 
-    if (args.find(',') != std::string::npos) {
-      Fail("HC1025", file, line_no,
-           "StreamPrint in #exe only supports a single string literal argument");
-    }
+    auto parse_balanced = [&](char open, char close, const std::string& context) -> std::string {
+      skip_ws();
+      if (at_end() || source[pos] != open) {
+        Fail("HC1020", file, line_no, "expected '" + std::string(1, open) + "' for " + context);
+      }
+      ++pos;
+      std::ostringstream inner;
+      int depth = 1;
+      while (pos < source.size()) {
+        const char c = source[pos++];
+        if (c == '"' || c == '\'') {
+          inner << c;
+          const char quote = c;
+          while (pos < source.size()) {
+            const char qc = source[pos++];
+            inner << qc;
+            if (qc == '\\' && pos < source.size()) {
+              inner << source[pos++];
+              continue;
+            }
+            if (qc == quote) {
+              break;
+            }
+          }
+          continue;
+        }
+        if (c == open) {
+          ++depth;
+          inner << c;
+          continue;
+        }
+        if (c == close) {
+          --depth;
+          if (depth == 0) {
+            return inner.str();
+          }
+          inner << c;
+          continue;
+        }
+        inner << c;
+      }
+      Fail("HC1020", file, line_no, "unterminated " + context + " in #exe block");
+    };
 
-    if (args.size() < 2 || args.front() != '"' || args.back() != '"') {
-      Fail("HC1021", file, line_no, "StreamPrint argument must be a string literal");
-    }
+    auto split_args = [&](const std::string& payload) {
+      std::vector<std::string> args;
+      std::string current;
+      int paren_depth = 0;
+      int bracket_depth = 0;
+      int brace_depth = 0;
+      bool saw_token = false;
+      for (std::size_t i = 0; i < payload.size(); ++i) {
+        const char c = payload[i];
+        if (c == '"' || c == '\'') {
+          saw_token = true;
+          const char quote = c;
+          current.push_back(c);
+          ++i;
+          while (i < payload.size()) {
+            const char qc = payload[i];
+            current.push_back(qc);
+            if (qc == '\\' && i + 1 < payload.size()) {
+              current.push_back(payload[++i]);
+            } else if (qc == quote) {
+              break;
+            }
+            ++i;
+          }
+          continue;
+        }
+        if (c == '(') {
+          ++paren_depth;
+          saw_token = true;
+          current.push_back(c);
+          continue;
+        }
+        if (c == ')') {
+          --paren_depth;
+          saw_token = true;
+          current.push_back(c);
+          continue;
+        }
+        if (c == '[') {
+          ++bracket_depth;
+          saw_token = true;
+          current.push_back(c);
+          continue;
+        }
+        if (c == ']') {
+          --bracket_depth;
+          saw_token = true;
+          current.push_back(c);
+          continue;
+        }
+        if (c == '{') {
+          ++brace_depth;
+          saw_token = true;
+          current.push_back(c);
+          continue;
+        }
+        if (c == '}') {
+          --brace_depth;
+          saw_token = true;
+          current.push_back(c);
+          continue;
+        }
+        if (c == ',' && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0) {
+          const std::string trimmed_arg = Trim(current);
+          if (trimmed_arg.empty()) {
+            Fail("HC1020", file, line_no, "empty argument in #exe call");
+          }
+          args.push_back(trimmed_arg);
+          current.clear();
+          saw_token = false;
+          continue;
+        }
+        if (std::isspace(static_cast<unsigned char>(c)) == 0) {
+          saw_token = true;
+        }
+        current.push_back(c);
+      }
+      const std::string tail = Trim(current);
+      if (!tail.empty()) {
+        args.push_back(tail);
+      } else if (saw_token) {
+        Fail("HC1020", file, line_no, "empty trailing argument in #exe call");
+      }
+      return args;
+    };
 
-    return Unescape(args.substr(1, args.size() - 2));
+    auto parse_concatenated_string_literals = [&](std::string_view text,
+                                                  std::string* out) -> bool {
+      out->clear();
+      std::size_t i = 0;
+      auto skip_local_ws = [&]() {
+        while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i])) != 0) {
+          ++i;
+        }
+      };
+
+      bool saw_literal = false;
+      skip_local_ws();
+      while (i < text.size() && text[i] == '"') {
+        saw_literal = true;
+        ++i;
+        std::ostringstream raw;
+        while (i < text.size()) {
+          const char c = text[i++];
+          if (c == '\\' && i < text.size()) {
+            raw << c << text[i++];
+            continue;
+          }
+          if (c == '"') {
+            break;
+          }
+          raw << c;
+        }
+        out->append(Unescape(raw.str()));
+        skip_local_ws();
+      }
+
+      return saw_literal && i == text.size();
+    };
+
+    auto evaluate_stream_arg = [&](const std::string& arg) {
+      std::unordered_set<std::string> active_macros;
+      const std::string expanded = Trim(ExpandText(arg, file, line_no, &active_macros));
+      if (expanded.empty()) {
+        return std::string();
+      }
+      std::string concatenated;
+      if (parse_concatenated_string_literals(expanded, &concatenated)) {
+        return concatenated;
+      }
+      return expanded;
+    };
+
+    auto evaluate_condition = [&](const std::string& condition) {
+      std::unordered_set<std::string> active_macros;
+      const std::string expanded = ExpandText(condition, file, line_no, &active_macros);
+      return EvalIfExprValue(expanded, 0) != 0;
+    };
+
+    auto match_keyword = [&](std::string_view keyword) -> bool {
+      skip_ws();
+      if (source.substr(pos, keyword.size()) != keyword) {
+        return false;
+      }
+      const std::size_t next = pos + keyword.size();
+      if (next < source.size() && IsIdentContinue(source[next])) {
+        return false;
+      }
+      pos = next;
+      return true;
+    };
+
+    std::function<void(bool)> parse_stmt;
+    std::function<void(bool)> parse_block;
+
+    parse_block = [&](bool execute) {
+      skip_ws();
+      if (at_end() || source[pos] != '{') {
+        Fail("HC1018", file, line_no, "#exe requires a braced block body");
+      }
+      ++pos;
+      while (true) {
+        skip_ws();
+        if (at_end()) {
+          Fail("HC1018", file, line_no, "unterminated #exe block");
+        }
+        if (source[pos] == '}') {
+          ++pos;
+          return;
+        }
+        parse_stmt(execute);
+      }
+    };
+
+    parse_stmt = [&](bool execute) {
+      skip_ws();
+      if (at_end()) {
+        Fail("HC1018", file, line_no, "unterminated #exe block");
+      }
+
+      if (source[pos] == ';') {
+        ++pos;
+        return;
+      }
+      if (source[pos] == '{') {
+        parse_block(execute);
+        return;
+      }
+
+      if (match_keyword("if")) {
+        const std::string condition = parse_balanced('(', ')', "if condition");
+        const bool condition_true = execute ? evaluate_condition(condition) : false;
+        parse_stmt(execute && condition_true);
+        if (match_keyword("else")) {
+          parse_stmt(execute && !condition_true);
+        }
+        return;
+      }
+
+      const std::string callee = parse_identifier();
+      const std::string args_payload = parse_balanced('(', ')', "call arguments");
+      const std::vector<std::string> args = split_args(args_payload);
+      skip_ws();
+      if (at_end() || source[pos] != ';') {
+        Fail("HC1024", file, line_no, "#exe call must end with ';'");
+      }
+      ++pos;
+      if (!execute) {
+        return;
+      }
+
+      if (callee == "StreamPrint" || callee == "StreamDoc" || callee == "StreamExePrint") {
+        if (args.size() != 1) {
+          Fail("HC1025", file, line_no,
+               callee + " in #exe currently supports a single argument");
+        }
+        output << evaluate_stream_arg(args.front());
+        return;
+      }
+      if (callee == "Option" || callee == "Cd") {
+        return;
+      }
+
+      Fail("HC1019", file, line_no, "unsupported #exe call: " + callee);
+    };
+
+    parse_block(true);
+    skip_ws();
+    if (!at_end()) {
+      Fail("HC1024", file, line_no, "trailing tokens after #exe block");
+    }
+    return output.str();
   }
 
   static std::string Unescape(const std::string& escaped) {
@@ -1077,6 +1357,52 @@ class Preprocessor {
 
   static bool StartsWith(std::string_view text, std::string_view prefix) {
     return text.substr(0, prefix.size()) == prefix;
+  }
+
+  static bool IsExeDirectiveLine(std::string_view line) {
+    if (!StartsWith(line, "#exe")) {
+      return false;
+    }
+    if (line.size() == 4) {
+      return true;
+    }
+    const char next = line[4];
+    return std::isspace(static_cast<unsigned char>(next)) != 0 || next == '{';
+  }
+
+  static bool HasClosedExeBody(std::string_view line) {
+    std::size_t i = 4;
+    if (line.size() < 4) {
+      return false;
+    }
+    bool saw_open = false;
+    int depth = 0;
+    while (i < line.size()) {
+      const char c = line[i++];
+      if (c == '"' || c == '\'') {
+        const char quote = c;
+        while (i < line.size()) {
+          const char qc = line[i++];
+          if (qc == '\\' && i < line.size()) {
+            ++i;
+            continue;
+          }
+          if (qc == quote) {
+            break;
+          }
+        }
+        continue;
+      }
+      if (c == '{') {
+        saw_open = true;
+        ++depth;
+        continue;
+      }
+      if (c == '}' && depth > 0) {
+        --depth;
+      }
+    }
+    return saw_open && depth == 0;
   }
 
   static std::string LTrim(std::string text) {
