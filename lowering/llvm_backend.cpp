@@ -390,14 +390,73 @@ llvm::orc::JITDylibSearchOrder BuildModuleLinkOrder(const JitSessionState& state
   llvm::orc::JITDylibSearchOrder order;
   order.reserve(state.module_dylibs.size() + (state.runtime_dylib == nullptr ? 0 : 1));
   for (auto it = state.module_dylibs.rbegin(); it != state.module_dylibs.rend(); ++it) {
-    order.push_back(
-        {*it, llvm::orc::JITDylibLookupFlags::MatchExportedSymbolsOnly});
+    order.push_back({*it, llvm::orc::JITDylibLookupFlags::MatchAllSymbols});
   }
   if (state.runtime_dylib != nullptr) {
-    order.push_back(
-        {state.runtime_dylib, llvm::orc::JITDylibLookupFlags::MatchExportedSymbolsOnly});
+    order.push_back({state.runtime_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols});
   }
   return order;
+}
+
+Result GetOrCreateJitSession(std::string_view session_key,
+                             std::unordered_map<std::string, JitSessionState>* sessions,
+                             JitSessionState** state_out) {
+  auto it = sessions->find(std::string(session_key));
+  if (it == sessions->end()) {
+    JitSessionState state;
+    const Result initialized = InitializeJitSessionState(&state);
+    if (!initialized.ok) {
+      return initialized;
+    }
+    it = sessions->emplace(std::string(session_key), std::move(state)).first;
+  }
+  *state_out = &it->second;
+  return Result{true, ""};
+}
+
+Result ParseAndVerifyIrModule(std::string_view ir_text, std::unique_ptr<llvm::LLVMContext>* context_out,
+                              std::unique_ptr<llvm::Module>* module_out) {
+  auto context = std::make_unique<llvm::LLVMContext>();
+  llvm::SMDiagnostic diag;
+  std::unique_ptr<llvm::Module> module = ParseModule(ir_text, *context, &diag);
+  if (!module) {
+    return ErrorFromDiagnostic(diag);
+  }
+
+  const Result verified = VerifyModule(*module);
+  if (!verified.ok) {
+    return verified;
+  }
+
+  *context_out = std::move(context);
+  *module_out = std::move(module);
+  return Result{true, ""};
+}
+
+Result AddModuleToJitSession(JitSessionState* state, std::unique_ptr<llvm::LLVMContext> context,
+                             std::unique_ptr<llvm::Module> module,
+                             llvm::orc::JITDylib** module_jd_out = nullptr) {
+  llvm::orc::LLJIT* jit = state->jit.get();
+
+  const std::string module_dylib_name =
+      "__holyc_module_" + std::to_string(++state->next_module_id);
+  auto module_jd_or_err = jit->createJITDylib(module_dylib_name);
+  if (!module_jd_or_err) {
+    return Result{false, llvm::toString(module_jd_or_err.takeError())};
+  }
+  llvm::orc::JITDylib* module_jd = &*module_jd_or_err;
+  module_jd->setLinkOrder(BuildModuleLinkOrder(*state));
+
+  llvm::orc::ThreadSafeModule tsm(std::move(module), std::move(context));
+  if (auto err = jit->addIRModule(*module_jd, std::move(tsm))) {
+    return Result{false, llvm::toString(std::move(err))};
+  }
+
+  state->module_dylibs.push_back(module_jd);
+  if (module_jd_out != nullptr) {
+    *module_jd_out = module_jd;
+  }
+  return Result{true, ""};
 }
 
 Result RunTool(const std::vector<std::string>& args) {
@@ -571,8 +630,35 @@ Result BuildExecutableFromIr(std::string_view ir_text, std::string_view output_p
 #endif
 }
 
+Result LoadIrJit(std::string_view ir_text, std::string_view session_name) {
+#ifdef HOLYC_LLVM_HEADERS_AVAILABLE
+  EnsureLlvmInitialized();
+
+  const std::string key = SessionKey(session_name);
+  auto& sessions = JitSessions();
+  JitSessionState* state = nullptr;
+  const Result session = GetOrCreateJitSession(key, &sessions, &state);
+  if (!session.ok) {
+    return session;
+  }
+
+  std::unique_ptr<llvm::LLVMContext> context;
+  std::unique_ptr<llvm::Module> module;
+  const Result parsed = ParseAndVerifyIrModule(ir_text, &context, &module);
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  return AddModuleToJitSession(state, std::move(context), std::move(module));
+#else
+  (void)ir_text;
+  (void)session_name;
+  return Result{false, "LLVM backend not enabled at build time"};
+#endif
+}
+
 Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
-                    bool reset_after_run) {
+                    bool reset_after_run, std::string_view entry_symbol_name) {
 #ifdef HOLYC_LLVM_HEADERS_AVAILABLE
   EnsureLlvmInitialized();
 
@@ -582,44 +668,41 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     sessions.erase(key);
   }
 
-  if (sessions.find(key) == sessions.end()) {
-    JitSessionState state;
-    const Result initialized = InitializeJitSessionState(&state);
-    if (!initialized.ok) {
-      return initialized;
-    }
-    sessions[key] = std::move(state);
-  }
-  JitSessionState& state = sessions[key];
-  llvm::orc::LLJIT* jit = state.jit.get();
-
-  auto context = std::make_unique<llvm::LLVMContext>();
-  llvm::SMDiagnostic diag;
-  std::unique_ptr<llvm::Module> module = ParseModule(ir_text, *context, &diag);
-  if (!module) {
-    return ErrorFromDiagnostic(diag);
+  JitSessionState* state = nullptr;
+  const Result session = GetOrCreateJitSession(key, &sessions, &state);
+  if (!session.ok) {
+    return session;
   }
 
-  Result verified = VerifyModule(*module);
-  if (!verified.ok) {
+  std::unique_ptr<llvm::LLVMContext> context;
+  std::unique_ptr<llvm::Module> module;
+  const Result parsed = ParseAndVerifyIrModule(ir_text, &context, &module);
+  if (!parsed.ok) {
     if (reset_after_run) {
       sessions.erase(key);
     }
-    return verified;
+    return parsed;
   }
 
-  llvm::Function* entry_fn = module->getFunction("main");
+  if (entry_symbol_name.empty()) {
+    if (reset_after_run) {
+      sessions.erase(key);
+    }
+    return Result{false, "jit: missing entry target"};
+  }
+
+  llvm::Function* entry_fn = module->getFunction(std::string(entry_symbol_name));
   if (entry_fn == nullptr) {
     if (reset_after_run) {
       sessions.erase(key);
     }
-    return Result{false, "jit: missing Main() function"};
+    return Result{false, "jit: missing entry symbol '" + std::string(entry_symbol_name) + "'"};
   }
-  const std::string entry_symbol = "__holyc_entry_" + std::to_string(++state.next_entry_id);
+  const std::string entry_symbol = "__holyc_entry_" + std::to_string(++state->next_entry_id);
   const std::string entry_target_symbol =
-      "__holyc_entry_target_" + std::to_string(state.next_entry_id);
+      "__holyc_entry_target_" + std::to_string(state->next_entry_id);
   entry_fn->setName(entry_target_symbol);
-  Result wrapper_result = BuildJitEntrypointWrapper(*module, entry_fn, entry_symbol);
+  const Result wrapper_result = BuildJitEntrypointWrapper(*module, entry_fn, entry_symbol);
   if (!wrapper_result.ok) {
     if (reset_after_run) {
       sessions.erase(key);
@@ -627,27 +710,17 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
     return wrapper_result;
   }
 
-  const std::string module_dylib_name =
-      "__holyc_module_" + std::to_string(++state.next_module_id);
-  auto module_jd_or_err = jit->createJITDylib(module_dylib_name);
-  if (!module_jd_or_err) {
+  llvm::orc::JITDylib* module_jd = nullptr;
+  const Result add_module = AddModuleToJitSession(state, std::move(context), std::move(module),
+                                                   &module_jd);
+  if (!add_module.ok) {
     if (reset_after_run) {
       sessions.erase(key);
     }
-    return Result{false, llvm::toString(module_jd_or_err.takeError())};
+    return add_module;
   }
-  llvm::orc::JITDylib* module_jd = &*module_jd_or_err;
-  module_jd->setLinkOrder(BuildModuleLinkOrder(state));
 
-  llvm::orc::ThreadSafeModule tsm(std::move(module), std::move(context));
-  if (auto err = jit->addIRModule(*module_jd, std::move(tsm))) {
-    if (reset_after_run) {
-      sessions.erase(key);
-    }
-    return Result{false, llvm::toString(std::move(err))};
-  }
-  state.module_dylibs.push_back(module_jd);
-
+  llvm::orc::LLJIT* jit = state->jit.get();
   auto sym = jit->lookup(*module_jd, entry_symbol);
   if (!sym) {
     if (reset_after_run) {
@@ -669,6 +742,7 @@ Result ExecuteIrJit(std::string_view ir_text, std::string_view session_name,
   (void)ir_text;
   (void)session_name;
   (void)reset_after_run;
+  (void)entry_symbol_name;
   return Result{false, "LLVM backend not enabled at build time"};
 #endif
 }

@@ -176,6 +176,7 @@ add_executable(holyc
   lowering/llvm_irbuilder_backend.cpp
   runtime/hc_runtime.cpp
   src/main.cpp
+  src/repl.cpp
 )
 
 target_include_directories(
@@ -1552,6 +1553,27 @@ if(BUILD_TESTING)
       COMMAND $<TARGET_FILE:holyc> jit "${CMAKE_CURRENT_SOURCE_DIR}/tests/samples/inline_asm_input_operand.HC" --jit-backend=llvm
     )
     set_tests_properties(holyc.jit.llvm.inline-asm-input-operand PROPERTIES PASS_REGULAR_EXPRESSION "5")
+
+    add_test(
+      NAME holyc.repl.basic
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/repl/run_repl_test.sh" $<TARGET_FILE:holyc> basic
+    )
+    add_test(
+      NAME holyc.repl.multiline
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/repl/run_repl_test.sh" $<TARGET_FILE:holyc> multiline
+    )
+    add_test(
+      NAME holyc.repl.auto-multiline
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/repl/run_repl_test.sh" $<TARGET_FILE:holyc> auto-multiline
+    )
+    add_test(
+      NAME holyc.repl.global
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/repl/run_repl_test.sh" $<TARGET_FILE:holyc> global
+    )
+    add_test(
+      NAME holyc.repl.main-call
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/repl/run_repl_test.sh" $<TARGET_FILE:holyc> main-call
+    )
   endif()
 
   add_test(
